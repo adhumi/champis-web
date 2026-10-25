@@ -494,7 +494,11 @@ async function loadFromApi() {
     return; // API absente : page statique seule
   }
   if (!body.configured || body.tiles.length === 0) return;
-  const items = body.tiles.map((t) => ({
+  // Plusieurs jeux de départements peuvent coexister dans le bucket (Doubs seul, France…) ; une
+  // espèce n'a qu'une couche à la fois : on garde le jeu qui couvre le plus de départements.
+  const dh = pickDeptsHash(body);
+  const tiles = body.tiles.filter((t) => t.depts_hash === dh);
+  const items = tiles.map((t) => ({
     src: /^https?:/.test(t.url) ? t.url : `${base}${t.url}`,
     label: t.name,
   }));
@@ -503,7 +507,22 @@ async function loadFromApi() {
     loaded < items.length && body.mode === "presign"
       ? " — si le navigateur bloque les URL présignées (CORS), passer l'API en CHAMPIS_TILES_MODE=proxy"
       : "";
-  $("status").textContent += `\n${loaded}/${items.length} fichier(s) chargés depuis le bucket (${body.mode})${hint}`;
+  const nDepts = body.depts_by_hash?.[dh]?.length;
+  const jeu = nDepts ? `jeu d${dh} (${nDepts} département${nDepts > 1 ? "s" : ""})` : `jeu d${dh}`;
+  $("status").textContent +=
+    `\n${loaded}/${items.length} fichier(s) chargés depuis le bucket (${body.mode}), ${jeu}`;
+}
+
+/** Hash de départements à afficher : le plus de départements d'après le manifeste, sinon le plus
+ *  de fichiers ; à égalité, le dernier par ordre alphabétique (souvent le plus récent). */
+function pickDeptsHash(body) {
+  const counts = new Map();
+  for (const t of body.tiles) counts.set(t.depts_hash, (counts.get(t.depts_hash) ?? 0) + 1);
+  const score = (h) => [body.depts_by_hash?.[h]?.length ?? 0, counts.get(h), h];
+  return [...counts.keys()].sort((a, b) => {
+    const [x, y] = [score(a), score(b)];
+    return x[0] - y[0] || x[1] - y[1] || x[2].localeCompare(y[2]);
+  }).at(-1);
 }
 
 const drop = $("drop");
