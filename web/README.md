@@ -43,6 +43,6 @@ Affichage → « Score du jour » : la page appelle `GET /weather/bbox` sur l'em
 - Position dans l'URL (`#zoom/lat/lon`) pour partager une vue.
 - Panneau repliable (clic sur son en-tête) : replié par défaut sur les écrans de moins de 600 px, le choix est mémorisé dans `localStorage` (`champis.panel`).
 
-## Pas encore là
+## Pas de portage du scoring
 
-Le portage JS du scoring (`web/src/scoring.js`, skill `scoring-parity`) : pour l'instant la page prend `M_eff` et `Φ` tels que l'API les renvoie, elle ne les recalcule pas. Nécessaire pour le site de la phase 3 (hors ligne, changement de jour sans réseau au-delà de J+7).
+La page prend `M_eff` et `Φ` tels que l'API les renvoie pour les 11 jours et ne les recalcule pas. Décision du 30 oct. 2026 : le site n'a pas de hors ligne, donc pas de portage JS du scoring ; la parité (skill `scoring-parity`) ne concerne que Python et Swift. Seule la palette est lue dans `shared/`.
