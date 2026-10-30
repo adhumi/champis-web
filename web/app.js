@@ -51,6 +51,40 @@ const mode = () => $("mode").value; // "T" ou "S"
 const dayOffset = () => +$("day").value;
 const WEATHER_BLOCK = 16; // la cellule météo est cherchée par bloc de 16 px, pas par pixel
 
+// ---------------------------------------------------------------- panneau repliable
+// Avant la carte : le panneau doit se replier même si MapLibre ne se charge pas.
+
+const PANEL_KEY = "champis.panel"; // "open" | "closed" ; sans choix mémorisé : replié sur petit écran
+
+function setPanel(open, remember = false) {
+  $("panel").classList.toggle("collapsed", !open);
+  const b = $("toggle");
+  b.setAttribute("aria-expanded", String(open));
+  b.textContent = open ? "▴" : "▾";
+  b.title = open ? "Replier le panneau" : "Déplier le panneau";
+  if (remember) {
+    try {
+      localStorage.setItem(PANEL_KEY, open ? "open" : "closed");
+    } catch {
+      /* stockage indisponible : le choix ne vaut que pour la page */
+    }
+  }
+}
+
+function initialPanelOpen() {
+  let saved = null;
+  try {
+    saved = localStorage.getItem(PANEL_KEY);
+  } catch {
+    /* ignoré */
+  }
+  if (saved === "open" || saved === "closed") return saved === "open";
+  return !matchMedia("(max-width: 600px)").matches;
+}
+
+setPanel(initialPanelOpen());
+$("panel-head").addEventListener("click", () => setPanel($("panel").classList.contains("collapsed"), true));
+
 // ---------------------------------------------------------------- palette
 
 async function loadPalette() {

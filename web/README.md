@@ -40,6 +40,7 @@ Affichage → « Score du jour » : la page appelle `GET /weather/bbox` sur l'em
 - Fonds : Plan IGN, orthophoto IGN (WMTS Géoplateforme, sans clé) ou OpenStreetMap.
 - Clic sur la carte : T (ou S, T, M_eff × Φ, cellule, jour) et classe au point cliqué, et l'espèce qui porte le score du groupe.
 - Position dans l'URL (`#zoom/lat/lon`) pour partager une vue.
+- Panneau repliable (clic sur son en-tête) : replié par défaut sur les écrans de moins de 600 px, le choix est mémorisé dans `localStorage` (`champis.panel`).
 
 ## Pas encore là
 
