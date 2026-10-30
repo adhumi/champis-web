@@ -40,6 +40,7 @@ Affichage → « Score du jour » : la page appelle `GET /weather/bbox` sur l'em
 - Les PNG de données sont décodés par `png.js` (lecture des octets, inflate natif), jamais par canvas : `getImageData` passe par la gestion des couleurs du navigateur et Safari trame les gris, ce qui faisait basculer des pixels isolés de classe près des seuils (et de classe d'altitude pour A). Test : `web/tests/test_png_decoder.py` (pytest, exécute node).
 - Fonds : Plan IGN, orthophoto IGN (WMTS Géoplateforme, sans clé) ou OpenStreetMap.
 - Clic sur la carte : T (ou S, T, M_eff × Φ, cellule, jour) et classe au point cliqué, et l'espèce qui porte le score du groupe.
+- **Vue France** : en mode « Score du jour », sous le zoom 9, la carte colore les départements par l'indice de `GET /departements` (même palette, même curseur de jour, 11 jours chargés d'un coup) au lieu d'appeler `/weather/bbox` (plafonné à 40 cellules). Contours : `web/departements.geojson`, Admin Express IGN simplifié via [france-geojson](https://github.com/gregoiredavid/france-geojson), Licence ouverte. La sonde donne l'indice, la classe, l'espèce qui le porte et la couverture météo.
 - Position dans l'URL (`#zoom/lat/lon`) pour partager une vue.
 - Panneau repliable (clic sur son en-tête) : replié par défaut sur les écrans de moins de 600 px, le choix est mémorisé dans `localStorage` (`champis.panel`).
 
