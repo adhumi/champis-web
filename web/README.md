@@ -37,6 +37,7 @@ Affichage → « Score du jour » : la page appelle `GET /weather/bbox` sur l'em
 
 - Couche par espèce, ou **max du groupe** (cèpes, girolles) quand plusieurs espèces d'un groupe sont chargées — règle 9 du modèle.
 - Colorisation côté client selon `shared/palette.json` (seuils et hex lus tels quels, rien en dur).
+- Les PNG de données sont décodés par `png.js` (lecture des octets, inflate natif), jamais par canvas : `getImageData` passe par la gestion des couleurs du navigateur et Safari trame les gris, ce qui faisait basculer des pixels isolés de classe près des seuils (et de classe d'altitude pour A). Test : `web/tests/test_png_decoder.py` (pytest, exécute node).
 - Fonds : Plan IGN, orthophoto IGN (WMTS Géoplateforme, sans clé) ou OpenStreetMap.
 - Clic sur la carte : T (ou S, T, M_eff × Φ, cellule, jour) et classe au point cliqué, et l'espèce qui porte le score du groupe.
 - Position dans l'URL (`#zoom/lat/lon`) pour partager une vue.
