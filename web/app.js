@@ -87,32 +87,38 @@ function makeTransparentTile() {
   return c.convertToBlob({ type: "image/png" }).then((b) => b.arrayBuffer());
 }
 
+/** PNG de données → { v: valeur (premier canal), a: alpha (255 si le PNG n'en a pas) } par pixel.
+ *  Décodage par `png.js`, jamais par canvas : getImageData passe par la gestion des couleurs du
+ *  navigateur et Safari trame les gris (±1 niveau → points isolés près des seuils). */
 async function pngPixels(buf) {
-  const bmp = await createImageBitmap(new Blob([buf], { type: "image/png" }));
-  const c = new OffscreenCanvas(TILE, TILE);
-  const ctx = c.getContext("2d");
-  ctx.drawImage(bmp, 0, 0);
-  return ctx.getImageData(0, 0, TILE, TILE).data;
+  const { width, height, channels, data } = await decodePng(buf);
+  if (width !== TILE || height !== TILE) throw new Error(`Tuile ${width}×${height}, attendu ${TILE}`);
+  const n = TILE * TILE;
+  const v = new Uint8Array(n);
+  const a = new Uint8Array(n).fill(255);
+  const hasAlpha = channels === 2 || channels === 4;
+  for (let i = 0; i < n; i++) {
+    v[i] = data[i * channels];
+    if (hasAlpha) a[i] = data[i * channels + channels - 1];
+  }
+  return { v, a };
 }
 
 /** PNG gris+alpha → Float32Array de T (NaN = nodata). */
 async function decodeT(buf) {
-  const px = await pngPixels(buf);
+  const { v, a } = await pngPixels(buf);
   const { scale, nodata } = palette.tile_encoding;
   const out = new Float32Array(TILE * TILE);
-  for (let i = 0; i < out.length; i++) {
-    const v = px[i * 4];
-    out[i] = px[i * 4 + 3] === 0 || v === nodata ? NaN : v / scale;
-  }
+  for (let i = 0; i < out.length; i++) out[i] = a[i] === 0 || v[i] === nodata ? NaN : v[i] / scale;
   return out;
 }
 
 /** PNG de la couche A → indice de classe par pixel (nodata de la palette si inconnu). */
 async function decodeAlt(buf) {
-  const px = await pngPixels(buf);
+  const { v, a } = await pngPixels(buf);
   const { nodata } = palette.alt_encoding;
   const out = new Uint8Array(TILE * TILE);
-  for (let i = 0; i < out.length; i++) out[i] = px[i * 4 + 3] === 0 ? nodata : px[i * 4];
+  for (let i = 0; i < out.length; i++) out[i] = a[i] === 0 ? nodata : v[i];
   return out;
 }
 
