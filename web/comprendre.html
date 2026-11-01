@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex" />
+  <title>Champis — comprendre</title>
+  <link rel="icon" href="logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="site.css" />
+  <style>
+    .comprendre { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 24px; max-width: 1100px; margin: 0 auto; width: 100%; padding: 20px; }
+    .comprendre nav.articles { display: flex; flex-direction: column; gap: 4px; align-self: start; position: sticky; top: 16px; }
+    .comprendre nav.articles a { text-decoration: none; color: var(--fg); padding: 8px 12px; border-radius: 8px; }
+    .comprendre nav.articles a[aria-current="page"] { background: var(--panel); border: 1px solid var(--border); font-weight: 600; }
+    .species-list { list-style: none; padding: 0; margin: 1rem 0; display: grid; gap: 8px; }
+    .species-list a { display: block; text-decoration: none; color: var(--fg); padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); }
+    .species-list em { display: block; color: var(--muted); font-size: .875rem; }
+    .photo { margin: 0 0 1rem; }
+    .photo img { width: 100%; max-height: 360px; object-fit: cover; border-radius: var(--radius); display: block; }
+    .photo figcaption, .photo .placeholder { font-size: .8rem; color: var(--muted); margin-top: 4px; }
+    .photo .placeholder { padding: 32px; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); }
+    .confusion { border-left: 3px solid var(--border); padding: 4px 12px; margin: 10px 0; }
+    .confusion h3 { font-size: 1rem; margin: 0; }
+    .confusion em { color: var(--muted); }
+    .consigne { padding: 12px 14px; border-radius: var(--radius); border: 1px solid var(--accent); }
+    .back { font-size: .875rem; }
+    @media (max-width: 719px) {
+      .comprendre { grid-template-columns: 1fr; padding: 12px; }
+      .comprendre nav.articles { position: static; flex-direction: row; flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+  <header id="site-header"></header>
+  <main class="comprendre">
+    <nav class="articles" id="articles" aria-label="Articles"></nav>
+    <article class="reading" id="content"><p class="muted">Chargement…</p></article>
+  </main>
+  <nav id="site-tabs" aria-label="Pages"></nav>
+  <footer class="site-footer"></footer>
+  <script src="site.js"></script>
+  <script src="comprendre.js"></script>
+</body>
+</html>

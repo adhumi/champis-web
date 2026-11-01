@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex" />
+  <title>Champis — soutenir</title>
+  <link rel="icon" href="logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+  <header id="site-header"></header>
+  <main class="reading">
+    <h1>Soutenir Champis</h1>
+    <p>Champis est gratuit, sans compte et sans publicité. Il tourne pourtant sur de vrais serveurs : la météo de toute la forêt française est recalculée chaque matin, les cartes de terrain sont stockées et servies, les notifications partent de là.</p>
+    <p>Le projet est pensé d'abord pour quelques cueilleurs et leurs proches, puis ouvert à tous. Son infrastructure est financée par des dons, à hauteur de ce qu'elle coûte, pas plus.</p>
+    <h2>Ce que finance un don</h2>
+    <ul>
+      <li>Le serveur qui calcule et sert l'indice météo et les scores de vos coins.</li>
+      <li>Le stockage et la diffusion des cartes de terrain à 25 mètres.</li>
+      <li>Le nom de domaine et les notifications.</li>
+    </ul>
+    <p id="support-action" class="card">Les dons ouvriront bientôt depuis cette page. Merci d'être passé.</p>
+    <h2>Ce qu'un don ne change pas</h2>
+    <p>Rien. Les mêmes cartes, les mêmes mots pour tout le monde ; aucun contenu réservé, aucun classement, aucune donnée collectée en plus.</p>
+    <p class="small muted">Les données de Champis sont publiques et sous licence ouverte : <a href="comprendre.html?article=donnees-et-sources">leurs sources et leurs licences</a>.</p>
+  </main>
+  <nav id="site-tabs" aria-label="Pages"></nav>
+  <footer class="site-footer"></footer>
+  <script src="site.js"></script>
+  <script>
+    Site.renderNav("soutenir.html");
+    Site.loadPalette().catch(() => {});
+    if (Site.SUPPORT_URL) {
+      document.getElementById("support-action").innerHTML =
+        `<a class="button" href="${Site.esc(Site.SUPPORT_URL)}" rel="noopener">Faire un don</a> <span class="small muted">Paiement sécurisé, montant libre, sans compte Champis.</span>`;
+    }
+  </script>
+</body>
+</html>

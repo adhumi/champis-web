@@ -1,53 +1,48 @@
-# web
+# web — le site champis.adhumi.fr
 
-Carte web jetable des phases 1–2 : une page statique (MapLibre GL + PMTiles, chargés par CDN, aucun build) qui affiche le potentiel terrain T produit par le pipeline, ou le score du jour `S = T × M_eff × Φ` avec la météo de l'API. Deviendra champis.adhumi.fr en phase 3.
+Quatre pages statiques, sans build (MapLibre GL et PMTiles par CDN), servies par champis-api sous `/web/` (`CHAMPIS_SERVE_WEB=1`, le défaut) avec `/shared/` et `/species/` à côté : la page lit `shared/palette.json`, `shared/texts/` et `species/<id>.json` aux mêmes chemins qu'en local. Refonte UX, lot 5 (1er nov. 2026) : même structure et même vocabulaire que l'app, sans l'identité Apple.
+
+| Page | Rôle |
+| --- | --- |
+| `index.html` (Aujourd'hui) | La France colorée par l'indice du jour de `GET /departements` pour le groupe choisi (Cèpes par défaut), le bandeau des onze jours (pastille = meilleure classe atteinte en France ce jour-là), une phrase de saison (`Site.seasonSentence`), la légende, trois liens. Un clic sur un département donne son libellé et un lien vers la carte. |
+| `carte.html` (Carte) | La carte à la parcelle de la phase 1, alignée sur l'app : panneau fixe à droite (360 px) sur ordinateur, plein écran sur téléphone (panneau replié en haut, bandeau en bas, fiche en panneau coulissant). Opacité fixe, fond de carte dans le panneau, fiche en clair avec « Détails ». |
+| `comprendre.html` (Comprendre) | Les articles de `shared/texts/` (Markdown rendu par `Site.renderMarkdown`) et les fiches d'espèces du bloc `about` de `GET /species` (`?article=especes&espece=<id>`), en colonne de lecture de 680 px. |
+| `soutenir.html` | Page de dons sobre. Le lien de paiement est `Site.SUPPORT_URL` dans `site.js` (`null` tant qu'Adrien ne l'a pas renseigné : la page explique en attendant). |
+
+Navigation : en-tête sur ordinateur, barre à trois entrées en bas sur téléphone (`Site.renderNav`). `noindex` sur toutes les pages. Sous la carte et les fiches, la ligne « Pour garder vos coins et être prévenu quand c'est bon : l'app Champis sur iPhone ».
+
+## Identité (`site.css`)
+
+Fond papier clair ou sombre selon le système, accent = le vert « Bon » de la palette, posé en variable CSS par `site.js` après lecture de `shared/palette.json` ; `system-ui`, coins arrondis, aucune ombre portée. Le logo (`logo.svg`) reprend les formes de l'icône de l'app.
 
 ## Lancer
 
-Les tuiles sont des PNG de données (gris = T × 254, alpha 0 = hors forêt) : la page lit `shared/palette.json` pour les seuils et les couleurs, et `species/<id>.json` pour les noms et les groupes. Il faut donc servir **la racine du dépôt** :
-
 ```bash
-python3 -m http.server 8000          # depuis la racine du dépôt
+make serve                           # champis-api sert /web/, /shared/, /species et l'API
 open http://localhost:8000/web/
 ```
 
-Puis glisser un ou plusieurs `data/tiles/T-*.pmtiles`, et le `data/tiles/A-300m-*.pmtiles` (classes d'altitude), dans la zone prévue (ou cliquer dessus). L'espèce est déduite du nom du fichier (`T-<espèce>-…`) ; `A-…` est reconnu comme la couche d'altitude.
+Les pages appellent l'API à leur propre origine (`Site.apiBase`). En statique depuis la racine du dépôt (`python3 -m http.server 8080`), indiquer l'API : `?api=http://127.0.0.1:8000`.
 
-Quand l'API est joignable et qu'un bucket est configuré (`GET /tiles`, voir `api/README.md`), la page charge toute seule les PMTiles publiés ; le glisser-déposer sert alors de complément ou de repli.
+## Mode développement : `?dev=1`
 
-Avec un serveur qui gère les requêtes `Range` (`npx serve .`, nginx, un bucket…), on peut aussi passer les tuiles en URL :
-
-```
-http://localhost:3000/web/?tiles=../data/tiles/T-boletus_edulis-…pmtiles,../data/tiles/T-boletus_aereus-…pmtiles
-```
-
-(`python -m http.server` ne gère pas `Range`, d'où le glisser-déposer.)
+Sur la carte, `?dev=1` affiche l'adresse de l'API, le glisser-déposer de fichiers PMTiles (`data/tiles/T-*.pmtiles` et le `A-300m-*.pmtiles`, l'espèce est déduite du nom) et les diagnostics (fichiers chargés depuis le bucket, nombre de cellules météo). Avec un serveur qui gère `Range`, les tuiles passent aussi en URL : `carte.html?tiles=../data/tiles/T-….pmtiles,…`.
 
 ## Score du jour (API)
 
-```bash
-uv run uvicorn champis_api.app:app          # dans un autre terminal, voir api/README.md
-```
+La page appelle `GET /weather/bbox` sur l'emprise visible et colorise `T × M_eff × Φ` ; le bandeau de jour va de J−3 à J+7 sans nouvel appel (11 jours d'un coup). Pour un groupe, le score est le max sur les espèces (règle 9). Un pixel sans cellule météo reste transparent, jamais 0,5 inventé ; une météo que le serveur n'a pas pu rafraîchir est dite en clair.
 
-Affichage → « Score du jour » : la page appelle `GET /weather/bbox` sur l'emprise visible (URL de l'API modifiable dans le panneau : l'origine de la page quand elle est servie par champis-api, sinon `http://127.0.0.1:8000`) et colorise `T × M_eff × Φ`. Le curseur de jour va de J−3 à J+7 sans nouvel appel : l'API renvoie les 11 jours d'un coup. Pour un groupe, le score est le max sur les espèces de `T_e × M_eff_e × Φ_e` (règle 9). Un pixel sans cellule météo reste transparent (jamais 0,5 inventé) ; « cache périmé » s'affiche quand l'API sert son cache faute d'Open-Meteo.
+**Classe d'altitude du pixel** : l'API renvoie `M_eff` et `Φ` par classe de 300 m ; la page choisit la classe du pixel grâce à la couche `A-300m-….pmtiles` quand elle est chargée, sinon repli sur l'altitude médiane de la forêt de la cellule (`elevation_m`), indiqué « (médiane cellule) » dans Détails. Largeur de classe et nodata viennent de `shared/palette.json` (`alt_encoding`).
 
-**Classe d'altitude du pixel** : l'API renvoie `M_eff` et `Φ` par classe de 300 m ; la page choisit la classe du pixel grâce à la couche `A-300m-….pmtiles` (classes d'altitude, un seul fichier pour toutes les espèces, produite par `champis-pipeline tiles`) quand elle est glissée avec les T. Sans elle, repli sur la classe de l'altitude médiane de la forêt de la cellule (`elevation_m`), et le gel « seulement en altitude » n'est pas visible à l'intérieur d'une cellule ; la sonde l'indique par « (médiane cellule) ». Largeur de classe et nodata viennent de `shared/palette.json` (`alt_encoding`).
+**Vue France** : sous le zoom 9 en mode score, la carte colore les départements par l'indice de `GET /departements` (même palette, même bandeau). Contours : `web/departements.geojson`, Admin Express IGN simplifié via [france-geojson](https://github.com/gregoiredavid/france-geojson), Licence ouverte.
 
-## Ce que fait la page
+## Ce que fait le code
 
-- Couche par espèce, ou **max du groupe** (cèpes, girolles) quand plusieurs espèces d'un groupe sont chargées — règle 9 du modèle.
-- Colorisation côté client selon `shared/palette.json` (seuils et hex lus tels quels, rien en dur).
-- Les PNG de données sont décodés par `png.js` (lecture des octets, inflate natif), jamais par canvas : `getImageData` passe par la gestion des couleurs du navigateur et Safari trame les gris, ce qui faisait basculer des pixels isolés de classe près des seuils (et de classe d'altitude pour A). Test : `web/tests/test_png_decoder.py` (pytest, exécute node).
-- Fonds : Plan IGN, orthophoto IGN (WMTS Géoplateforme, sans clé) ou OpenStreetMap.
-- Clic sur la carte : T (ou S, T, M_eff × Φ, cellule, jour) et classe au point cliqué, et l'espèce qui porte le score du groupe.
-- **Vue France** : en mode « Score du jour », sous le zoom 9, la carte colore les départements par l'indice de `GET /departements` (même palette, même curseur de jour, 11 jours chargés d'un coup) au lieu d'appeler `/weather/bbox` (plafonné à 40 cellules). Contours : `web/departements.geojson`, Admin Express IGN simplifié via [france-geojson](https://github.com/gregoiredavid/france-geojson), Licence ouverte. La sonde donne l'indice, la classe, l'espèce qui le porte et la couverture météo.
-- Position dans l'URL (`#zoom/lat/lon`) pour partager une vue.
-- Panneau repliable (clic sur son en-tête) : replié par défaut sur les écrans de moins de 600 px, le choix est mémorisé dans `localStorage` (`champis.panel`).
+- `site.js` : fonctions pures partagées (dates en français sans locale, classes de la palette, phrase de saison, Markdown, adresse de l'API) exportées pour node, plus la navigation, la légende et le bandeau des jours côté navigateur. Testé par `web/tests/test_site.py`.
+- `app.js` : la carte (couche par espèce ou max du groupe, colorisation côté client, météo, vue France, fiche en clair). `png.js` décode les PNG de données octet par octet, jamais par canvas (Safari trame les gris) ; testé par `web/tests/test_png_decoder.py`.
+- `today.js`, `comprendre.js` : l'accueil et Comprendre.
+- Position de la carte dans l'URL (`#zoom/lat/lon`) pour partager une vue.
 
 ## Pas de portage du scoring
 
-La page prend `M_eff` et `Φ` tels que l'API les renvoie pour les 11 jours et ne les recalcule pas. Décision du 30 oct. 2026 : le site n'a pas de hors ligne, donc pas de portage JS du scoring ; la parité (skill `scoring-parity`) ne concerne que Python et Swift. Seule la palette est lue dans `shared/`.
-
-## Fiche en clair et bandeau des jours (lot 2, 1er nov. 2026)
-
-La fiche au clic dit d'abord le libellé de la palette et le jour (« Bon aujourd'hui »), l'espèce, la phrase de terrain (déduite du libellé de T) et les phrases de `GET /weather` › `summary` ; les chiffres sont derrière « Détails ». Le jour se choisit dans un bandeau de onze pastilles, colorées par l'indice du département sous le centre de la carte (`GET /departements`, chargé dès le choix de la couche). Le potentiel toute saison est une case à cocher.
+La page prend `M_eff` et `Φ` tels que l'API les renvoie et ne les recalcule pas (décision du 30 oct. 2026 : pas de hors ligne sur le web, donc pas de portage JS ; la parité ne concerne que Python et Swift). Les phrases en clair viennent de `GET /weather` › `summary`, les mêmes que l'app.

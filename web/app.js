@@ -1,8 +1,10 @@
-/* Carte jetable des phases 1–2 : potentiel terrain T (PMTiles gris 8 bits) colorisé côté client
- * avec shared/palette.json, et score du jour S = T × M_eff × Φ avec les valeurs de l'API
+/* Page Carte du site (carte.html) : potentiel terrain T (PMTiles gris 8 bits) colorisé côté
+ * client avec shared/palette.json, et score du jour S = T × M_eff × Φ avec les valeurs de l'API
  * (/weather/bbox : M_eff et Φ par cellule 5 km, jour et classe d'altitude). Aucune valeur de
  * modèle ici : palette, seuils, encodage des tuiles et noms d'espèces sont lus depuis le dépôt,
- * M et Φ depuis l'API (servir la racine du dépôt, voir README). */
+ * M et Φ depuis l'API (servir la racine du dépôt, voir README). Dates, légende, bandeau et
+ * navigation viennent de site.js (lot 5) ; le glisser-déposer et l'adresse de l'API sont des
+ * outils de développement (`?dev=1`). */
 
 const TILE = 256;
 const MIN_ZOOM = 6;
@@ -59,42 +61,25 @@ const mode = () => ($("potential").checked ? "T" : "S"); // "T" ou "S"
 let selectedDay = 0; // J−3 → J+7, choisi dans le bandeau des jours
 const dayOffset = () => selectedDay;
 const DAY_RANGE = [-3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7];
-const WEEKDAYS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
 const WEATHER_BLOCK = 16; // la cellule météo est cherchée par bloc de 16 px, pas par pixel
+const OPACITY = 0.75; // opacité fixe de l'overlay (décision du 1er nov. 2026 : plus de réglage)
+const DEV = Site.isDev(location.search);
 
-// ---------------------------------------------------------------- panneau repliable
-// Avant la carte : le panneau doit se replier même si MapLibre ne se charge pas.
+// ---------------------------------------------------------------- navigation et panneau
 
-const PANEL_KEY = "champis.panel"; // "open" | "closed" ; sans choix mémorisé : replié sur petit écran
+Site.renderNav("carte.html");
+$("app-line").textContent = Site.APP_LINE;
+$("dev").hidden = !DEV;
 
-function setPanel(open, remember = false) {
+// Sur téléphone le panneau se replie sur une ligne (couche courante + bouton) ; sur ordinateur il
+// est fixe à droite et la classe n'a aucun effet.
+function setPanel(open) {
   $("panel").classList.toggle("collapsed", !open);
-  const b = $("toggle");
-  b.setAttribute("aria-expanded", String(open));
-  b.textContent = open ? "▴" : "▾";
-  b.title = open ? "Replier le panneau" : "Déplier le panneau";
-  if (remember) {
-    try {
-      localStorage.setItem(PANEL_KEY, open ? "open" : "closed");
-    } catch {
-      /* stockage indisponible : le choix ne vaut que pour la page */
-    }
-  }
+  $("toggle").setAttribute("aria-expanded", String(open));
+  $("toggle").textContent = open ? "Fermer" : "Calque et légende";
 }
-
-function initialPanelOpen() {
-  let saved = null;
-  try {
-    saved = localStorage.getItem(PANEL_KEY);
-  } catch {
-    /* ignoré */
-  }
-  if (saved === "open" || saved === "closed") return saved === "open";
-  return !matchMedia("(max-width: 600px)").matches;
-}
-
-setPanel(initialPanelOpen());
-$("panel-head").addEventListener("click", () => setPanel($("panel").classList.contains("collapsed"), true));
+setPanel(false);
+$("toggle").addEventListener("click", () => setPanel($("panel").classList.contains("collapsed")));
 
 // ---------------------------------------------------------------- palette
 
@@ -105,14 +90,8 @@ async function loadPalette() {
   classes = [...palette.thresholds]
     .sort((a, b) => b.min - a.min)
     .map((t) => ({ ...t, rgb: hexToRgb(t.hex) }));
-  const legend = $("legend");
-  legend.innerHTML = "";
-  for (const c of [...classes].reverse()) {
-    legend.insertAdjacentHTML(
-      "beforeend",
-      `<i style="background:${c.hex}"></i><span>${c.fr} (≥ ${c.min.toFixed(2)})</span>`
-    );
-  }
+  Site.applyAccent(palette);
+  Site.renderLegend($("legend"), classes);
 }
 
 function hexToRgb(hex) {
@@ -301,6 +280,11 @@ async function colorize(t) {
   return (await c.convertToBlob({ type: "image/png" })).arrayBuffer();
 }
 
+if (typeof maplibregl === "undefined" || typeof pmtiles === "undefined") {
+  $("weather-status").textContent = "La carte ne s'est pas chargée : vérifiez la connexion puis rechargez la page.";
+  throw new Error("MapLibre ou PMTiles absent (CDN injoignable)");
+}
+
 maplibregl.addProtocol("champis", async (params) => {
   const m = params.url.match(/^champis:\/\/([^/]+)\/v\d+\/(\d+)\/(\d+)\/(\d+)$/);
   if (!m) throw new Error(`URL invalide : ${params.url}`);
@@ -377,7 +361,7 @@ function paintDepts() {
   }
   expr.push("rgba(0,0,0,0)"); // département sans indice : transparent, jamais une valeur inventée
   map.setPaintProperty("depts-fill", "fill-color", expr.length > 3 ? expr : "rgba(0,0,0,0)");
-  map.setPaintProperty("depts-fill", "fill-opacity", +$("opacity").value);
+  map.setPaintProperty("depts-fill", "fill-opacity", OPACITY);
   paintDays();
 }
 
@@ -389,58 +373,33 @@ function centerDept() {
 }
 
 /** Jour ISO pour un décalage J+k. */
-function dateFor(k) {
-  if (!weather.today) return null;
-  const d = new Date(weather.today + "T12:00:00");
-  d.setDate(d.getDate() + k);
-  return d.toISOString().slice(0, 10);
-}
+const dateFor = (k) => Site.dateFor(weather.today, k);
 
-/** Bandeau des onze jours (lot 2) : une pastille par jour, colorée par l'indice du département
- *  sous le centre de la carte (GET /departements), le jour de la semaine dessous. */
+/** Bandeau des onze jours (lot 2, rendu par site.js au lot 5) : une pastille par jour, colorée par
+ *  l'indice du département sous le centre de la carte (GET /departements). */
 function buildDays() {
-  const box = $("days");
-  box.innerHTML = "";
-  for (const k of DAY_RANGE) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.setAttribute("role", "radio");
-    b.dataset.k = k;
-    b.innerHTML = "<i></i><span></span>";
-    b.addEventListener("click", () => {
-      selectedDay = k;
-      updateDayLabel();
-      setLayer(currentKey);
-      paintDepts();
-    });
-    box.appendChild(b);
-  }
   paintDays();
 }
 
 function paintDays() {
   const code = deptIndex.byDept.size > 0 && deptIndex.key === currentKey ? centerDept() : null;
-  for (const b of $("days").querySelectorAll("button")) {
-    const k = +b.dataset.k;
-    const iso = dateFor(k);
-    const v = code && iso ? deptSeries(code)?.[iso]?.value : null;
-    const dot = b.querySelector("i");
-    dot.style.background = v === null || v === undefined ? "transparent" : classify(v).hex;
-    b.querySelector("span").textContent = iso ? WEEKDAYS[new Date(iso + "T12:00:00").getDay()] : "";
-    b.setAttribute("aria-checked", k === selectedDay ? "true" : "false");
-    b.classList.toggle("today", k === 0);
-    const label = iso ? frenchDate(iso) : `J${k >= 0 ? "+" : ""}${k}`;
-    b.title = v === null || v === undefined ? label : `${label} : ${classify(v).fr}`;
-    b.setAttribute("aria-label", b.title);
-  }
+  Site.renderDays($("days"), {
+    today: weather.today,
+    selected: selectedDay,
+    classes: classes ?? [],
+    valueFor: (iso) => (code ? deptSeries(code)?.[iso]?.value ?? null : null),
+    onSelect: (k) => {
+      selectedDay = k;
+      updateDayLabel();
+      setLayer(currentKey);
+      paintDepts();
+    },
+  });
+  const layer = $("layer");
+  $("mobile-layer").textContent = layer.disabled ? "Carte" : layer.options[layer.selectedIndex]?.text ?? "Carte";
 }
 
-/** `2026-11-01` → `dim. 1 nov.` */
-function frenchDate(iso) {
-  const d = new Date(iso + "T12:00:00");
-  const months = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
-  return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]}`;
-}
+const frenchDate = Site.frenchDate;
 
 function setLayer(key) {
   currentKey = key;
@@ -458,7 +417,7 @@ function setLayer(key) {
     id: "T",
     type: "raster",
     source: "T",
-    paint: { "raster-opacity": +$("opacity").value, "raster-resampling": "nearest" },
+    paint: { "raster-opacity": OPACITY, "raster-resampling": "nearest" },
   });
 }
 
@@ -472,10 +431,6 @@ map.on("load", () => {
 });
 
 $("basemap").addEventListener("change", (e) => setBasemap(e.target.value));
-$("opacity").addEventListener("input", (e) => {
-  if (map.getLayer("T")) map.setPaintProperty("T", "raster-opacity", +e.target.value);
-  if (map.getLayer("depts-fill")) map.setPaintProperty("depts-fill", "fill-opacity", +e.target.value);
-});
 $("layer").addEventListener("change", (e) => {
   setLayer(e.target.value);
   deptIndex.byDept.clear();
@@ -489,12 +444,8 @@ $("potential").addEventListener("change", () => {
   setLayer(currentKey);
   fetchWeather();
 });
-// API : même origine quand la page est servie par champis-api (Railway, uvicorn) ; en dev avec
-// `python -m http.server` sur un autre port, l'API locale par défaut.
-$("api").value =
-  /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && location.port !== "8000"
-    ? "http://127.0.0.1:8000"
-    : location.origin;
+// API : même origine (la page est servie par champis-api), ou `?api=` en dev statique (Site.apiBase).
+$("api").value = Site.apiBase(location);
 $("api").addEventListener("change", fetchWeather);
 let moveTimer = null;
 map.on("moveend", () => {
@@ -509,7 +460,7 @@ map.on("moveend", () => {
 
 function updateDayLabel() {
   const d = currentDate();
-  $("day-label").textContent = d ? (dayOffset() === 0 ? `aujourd'hui, ${frenchDate(d)}` : frenchDate(d)) : "";
+  $("day-label").textContent = d ? (dayOffset() === 0 ? `Aujourd'hui, ${frenchDate(d)}` : frenchDate(d)) : "";
   paintDays();
 }
 
@@ -561,12 +512,13 @@ async function fetchWeather() {
     }
     const stale = body.cells.some((c) => c.stale);
     const missing = body.unavailable?.length ?? 0;
-    $("weather-status").textContent =
-      `Météo : ${body.cells.length} cellule(s) dans l'emprise` +
-      (stale ? " — cache périmé (Open-Meteo injoignable)" : "") +
-      (missing
-        ? ` — ${missing} sans météo (quota Open-Meteo${body.retry_after ? `, réessai dans ${body.retry_after} s` : ""})`
-        : "");
+    const notes = [
+      stale ? "Météo du dernier passage : le serveur n'a pas pu la rafraîchir." : "",
+      missing ? `Météo manquante sur une partie de l'emprise${body.retry_after ? `, nouvel essai dans ${body.retry_after} s` : ""}.` : "",
+    ].filter(Boolean);
+    $("weather-status").textContent = DEV
+      ? [`Météo : ${body.cells.length} cellule(s) dans l'emprise`, ...notes].join(" — ")
+      : notes.join(" ");
     if (missing && body.retry_after && body.retry_after <= 120) {
       clearTimeout(retryTimer);
       retryTimer = setTimeout(fetchWeather, body.retry_after * 1000 + 500);
@@ -628,7 +580,9 @@ function deptStatus() {
   const n = deptIndex.byDept.size;
   const date = currentDate();
   const covered = [...deptIndex.byDept.keys()].filter((c) => deptSeries(c)?.[date]?.value != null).length;
-  return `Vue France : indice par département (${covered}/${n} département${n > 1 ? "s" : ""} couverts) — zoomez pour les cellules`;
+  return DEV
+    ? `Vue France : indice par département (${covered}/${n} couverts) — zoomez pour la parcelle`
+    : "Vue par département : zoomez pour voir la parcelle.";
 }
 
 // ---------------------------------------------------------------- chargement des PMTiles
@@ -680,6 +634,9 @@ async function addMany(items) {
       : "Sans couche A : classe d'altitude = altitude médiane de la cellule météo",
     ...errors,
   ].join("\n");
+  if (!DEV && species.size === 0) {
+    $("weather-status").textContent = "Aucune carte publiée pour le moment.";
+  }
   if (currentKey) setLayer(currentKey); // une couche A ajoutée après coup change le rendu S
   fetchWeather();
   return loaded;
@@ -691,10 +648,10 @@ function refreshLayerList() {
   const groups = new Map();
   for (const s of species.values()) if (s.group) groups.set(s.group.id, s.group.fr);
   for (const [gid, fr] of groups) {
-    sel.add(new Option(`${fr} — max du groupe`, `g:${gid}`));
+    sel.add(new Option(fr, `g:${gid}`));
   }
   for (const [id, s] of [...species].sort((a, b) => a[1].names.fr.localeCompare(b[1].names.fr))) {
-    sel.add(new Option(`${s.names.fr} (${s.names.la})`, `s:${id}`));
+    sel.add(new Option(s.names.fr, `s:${id}`));
   }
   sel.disabled = species.size === 0;
   if (species.size > 0 && (!currentKey || ![...sel.options].some((o) => o.value === currentKey))) {
@@ -790,13 +747,15 @@ const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 /** Fiche en clair (lot 2) : libellé et jour, espèce, phrases, puis les chiffres derrière Détails. */
 function renderProbe({ value, name, phrases, details }) {
   const cls = classify(value);
-  const when = dayOffset() === 0 ? "aujourd'hui" : WEEKDAYS[new Date(currentDate() + "T12:00:00").getDay()];
+  const when = currentDate() ? Site.whenWord(currentDate(), weather.today) : "";
   const sub = [name, currentDate() ? frenchDate(currentDate()) : ""].filter(Boolean).join(" · ");
   probe.innerHTML =
     `<h2><span class="dot" style="background:${cls.hex}"></span>${esc(cls.fr)} ${mode() === "S" ? esc(when) : "toute saison"}</h2>` +
     `<div class="sub">${esc(sub)}</div>` +
     (phrases.length ? `<ul>${phrases.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : "") +
-    `<details><summary>Détails</summary><div>${esc(details)}</div></details>`;
+    `<details><summary>Détails</summary><div>${esc(details)}</div></details>` +
+    `<button type="button" class="button quiet small" id="probe-close">Fermer</button>`;
+  $("probe-close").addEventListener("click", () => (probe.style.display = "none"));
 }
 
 /** Phrases météo et saison de `GET /weather` › `summary` pour une cellule, une espèce, un jour, une classe. */

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Champis">
+  <defs>
+    <linearGradient id="ciel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9CC4E4"/>
+      <stop offset="1" stop-color="#DCEBF5"/>
+    </linearGradient>
+    <clipPath id="coins"><rect width="1024" height="1024" rx="228"/></clipPath>
+  </defs>
+  <g clip-path="url(#coins)">
+    <rect width="1024" height="1024" fill="url(#ciel)"/>
+<path fill="#3D8A58" stroke="#3D8A58" stroke-width="16" stroke-linejoin="round" d="M 0 556 C 60 540 100 506 150 508 C 200 510 230 548 280 544 C 330 540 360 492 420 494 C 480 496 500 540 552 538 C 604 536 630 486 690 488 C 750 490 770 536 820 532 C 870 528 900 500 950 504 C 990 507 1010 540 1024 548 L 1024 1024 L 0 1024 Z"/>
+<path fill="#3D8A58" stroke="#3D8A58" stroke-width="16" stroke-linejoin="round" d="M 262 330 L 308 417 L 290 417 L 334 491 L 310 491 L 354 560 L 170 560 L 214 491 L 190 491 L 234 417 L 216 417 Z"/>
+<path fill="#3D8A58" stroke="#3D8A58" stroke-width="16" stroke-linejoin="round" d="M 790 318 L 840 408 L 820 408 L 868 485 L 842 485 L 890 556 L 690 556 L 738 485 L 712 485 L 760 408 L 740 408 Z"/>
+<path fill="#3D8A58" stroke="#3D8A58" stroke-width="16" stroke-linejoin="round" d="M 560 418 L 593 470 L 580 470 L 611 515 L 594 515 L 626 556 L 494 556 L 526 515 L 509 515 L 540 470 L 527 470 Z"/>
+<path fill="#1E4D30" stroke="#1E4D30" stroke-width="16" stroke-linejoin="round" d="M 0 706 C 40 694 70 668 120 670 C 170 672 200 708 250 708 C 300 708 330 672 390 676 C 450 680 480 724 512 724 C 544 724 574 680 634 676 C 694 672 724 708 774 708 C 824 708 854 672 904 670 C 954 668 984 694 1024 706 L 1024 1024 L 0 1024 Z"/>
+<path fill="#1E4D30" stroke="#1E4D30" stroke-width="16" stroke-linejoin="round" d="M 118 430 L 174 537 L 152 537 L 205 627 L 176 627 L 230 712 L 6 712 L 60 627 L 31 627 L 84 537 L 62 537 Z"/>
+<path fill="#1E4D30" stroke="#1E4D30" stroke-width="16" stroke-linejoin="round" d="M 906 430 L 962 537 L 940 537 L 993 627 L 964 627 L 1018 712 L 794 712 L 848 627 L 819 627 L 872 537 L 850 537 Z"/>
+<path fill="#F0E6CF" d="M 404 500 L 620 500 C 648 590 676 690 660 780 C 648 838 596 856 512 856 C 428 856 376 838 364 780 C 348 690 376 590 404 500 Z"/>
+<path fill="#7A3A34" d="M 226 486 C 226 330 346 250 512 250 C 678 250 798 330 798 486 C 798 516 770 530 730 530 C 650 548 374 548 294 530 C 254 530 226 516 226 486 Z"/>
+  </g>
+</svg>

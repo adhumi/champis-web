@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex" />
+  <title>Champis — carte</title>
+  <link rel="icon" href="logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="site.css" />
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <style>
+    main.carte { display: grid; grid-template-columns: minmax(0, 1fr) 360px; height: calc(100vh - 53px); }
+    #map-col { position: relative; display: flex; flex-direction: column; min-width: 0; }
+    #map { flex: 1; position: relative; }
+    #strip { padding: 8px 12px; border-top: 1px solid var(--border); background: var(--panel); }
+    #panel { border-left: 1px solid var(--border); background: var(--panel); padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+    #panel label.field { display: block; font-size: .8rem; color: var(--muted); margin-bottom: 2px; }
+    #panel select { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); }
+    .check { display: flex; align-items: center; gap: 8px; font-size: .9rem; }
+    .note { font-size: .8rem; color: var(--muted); }
+    #weather-status { font-size: .8rem; color: var(--muted); }
+    #probe { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; background: var(--bg); display: none; }
+    #probe h2 { font-size: 1.05rem; margin: 0 0 2px; display: flex; align-items: center; gap: 8px; }
+    #probe .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--border); }
+    #probe .sub { color: var(--muted); font-size: .85rem; margin-bottom: 6px; }
+    #probe ul { margin: 0 0 6px; padding-left: 18px; }
+    #probe details { font-size: .8rem; color: var(--muted); }
+    #probe details div { font-family: ui-monospace, monospace; white-space: pre-line; margin-top: 4px; }
+    #dev { border-top: 1px dashed var(--border); padding-top: 10px; font-size: .8rem; color: var(--muted); }
+    #dev input[type=text] { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); }
+    #drop { margin-top: 8px; padding: 12px 8px; border: 2px dashed var(--border); border-radius: 8px; text-align: center; cursor: pointer; }
+    #drop.over { border-color: var(--accent); color: var(--fg); }
+    #drop input { display: none; }
+    #status { white-space: pre-line; margin-top: 6px; }
+    #mobile-controls { display: none; }
+    @media (max-width: 719px) {
+      main.carte { grid-template-columns: 1fr; height: calc(100vh - var(--nav-h)); }
+      #map-col { height: 100%; }
+      #panel { position: absolute; z-index: 5; top: 8px; left: 8px; right: 8px; border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; gap: 8px; max-height: 60%; }
+      #panel.collapsed > :not(#mobile-controls) { display: none; }
+      #mobile-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+      #mobile-controls button { border: 0; background: transparent; color: var(--accent); font-weight: 600; padding: 4px 6px; cursor: pointer; }
+      #probe { position: absolute; z-index: 6; left: 8px; right: 8px; bottom: 8px; max-height: 55%; overflow: auto; background: var(--panel); }
+      #strip { position: absolute; z-index: 4; left: 8px; right: 8px; bottom: 8px; border: 1px solid var(--border); border-radius: var(--radius); }
+      #probe[style*="block"] ~ #strip { display: none; }
+      #site-header { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header id="site-header"></header>
+  <main class="carte">
+    <div id="map-col">
+      <div id="map" role="application" aria-label="Carte des champignons"></div>
+      <div id="strip">
+        <div class="day-label" id="day-label"></div>
+        <div id="days"></div>
+      </div>
+    </div>
+    <aside id="panel" aria-label="Commandes de la carte">
+      <div id="mobile-controls">
+        <strong id="mobile-layer">Carte</strong>
+        <button id="toggle" type="button" aria-controls="panel" aria-expanded="false">Calque et légende</button>
+      </div>
+      <div>
+        <label class="field" for="layer">Couche</label>
+        <select id="layer" disabled><option>Chargement des tuiles…</option></select>
+      </div>
+      <label class="check"><input id="potential" type="checkbox" /> Afficher le potentiel toute saison</label>
+      <div id="potential-note" class="note" hidden>Le terrain seul, sans la météo ni la saison : pour repérer des secteurs.</div>
+      <div>
+        <label class="field" for="basemap">Fond de carte</label>
+        <select id="basemap">
+          <option value="plan">Plan IGN</option>
+          <option value="ortho">Photo aérienne IGN</option>
+          <option value="osm">OpenStreetMap</option>
+        </select>
+      </div>
+      <div id="weather-status" aria-live="polite"></div>
+      <div id="probe" aria-live="polite"></div>
+      <div id="legend"></div>
+      <p class="app-line" id="app-line"></p>
+      <div id="dev" hidden>
+        <label class="field" for="api">Adresse de l'API</label>
+        <input id="api" type="text" />
+        <div id="drop">
+          Glisser ici des <code>T-*.pmtiles</code> et le <code>A-*.pmtiles</code><br />(ou cliquer pour choisir)
+          <input id="files" type="file" accept=".pmtiles" multiple />
+        </div>
+        <div id="status"></div>
+      </div>
+    </aside>
+  </main>
+  <nav id="site-tabs" aria-label="Pages"></nav>
+  <footer class="site-footer"></footer>
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
+  <script src="png.js"></script>
+  <script src="site.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

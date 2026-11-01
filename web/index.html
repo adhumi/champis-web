@@ -2,109 +2,59 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Champis — carte</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex" />
+  <title>Champis — la France du jour</title>
+  <link rel="icon" href="logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="site.css" />
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
   <style>
-    :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --border: #ddd; }
-    @media (prefers-color-scheme: dark) {
-      :root { --bg: #1e1e1e; --fg: #eee; --muted: #aaa; --border: #444; }
+    .today { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; padding: 20px; max-width: 1200px; margin: 0 auto; width: 100%; }
+    #france { position: relative; aspect-ratio: 1 / 1; max-height: calc(100vh - 140px); border-radius: var(--radius); border: 1px solid var(--border); background: var(--panel); overflow: hidden; }
+    #france .maplibregl-ctrl-attrib { font-size: 10px; }
+    .today aside { display: flex; flex-direction: column; gap: 14px; }
+    .today h1 { font-size: 1.35rem; }
+    #sentence { font-size: 1.05rem; }
+    #group { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); }
+    .links { display: flex; flex-direction: column; gap: 8px; }
+    .links a { text-decoration: none; color: var(--fg); padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); }
+    .links a span { display: block; color: var(--muted); font-size: .875rem; }
+    #dept { min-height: 1.5em; }
+    @media (max-width: 719px) {
+      .today { grid-template-columns: 1fr; padding: 12px; gap: 12px; }
+      #france { max-height: 60vh; }
     }
-    html, body { margin: 0; height: 100%; font: 14px/1.4 system-ui, sans-serif; color: var(--fg); background: var(--bg); }
-    #map { position: absolute; inset: 0; }
-    #panel {
-      position: absolute; top: 10px; left: 10px; z-index: 1; width: 280px; max-width: calc(100vw - 20px);
-      max-height: calc(100% - 20px); overflow: auto; box-sizing: border-box;
-      background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,.15);
-    }
-    #panel.collapsed { padding: 6px 8px 6px 12px; }
-    #panel.collapsed #panel-body { display: none; }
-    #panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; }
-    #panel.collapsed #panel-head { margin: 0; }
-    #panel h1 { font-size: 16px; margin: 0; }
-    #toggle {
-      flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px;
-      background: transparent; color: var(--fg); font-size: 16px; line-height: 28px; cursor: pointer;
-    }
-    #toggle:hover { background: rgba(127,127,127,.15); }
-    #panel-body { margin-top: 8px; }
-    #panel label { display: block; margin: 8px 0 2px; color: var(--muted); font-size: 12px; }
-    #panel select, #panel input[type=range], #panel input[type=text] { width: 100%; box-sizing: border-box; }
-    #weather-status { margin-top: 4px; font-size: 12px; color: var(--muted); }
-    #drop {
-      margin-top: 10px; padding: 14px 8px; border: 2px dashed var(--border); border-radius: 6px;
-      text-align: center; color: var(--muted); font-size: 12px; cursor: pointer;
-    }
-    #drop.over { border-color: #4CA64C; color: var(--fg); }
-    #drop input { display: none; }
-    #legend { margin-top: 10px; display: grid; grid-template-columns: 16px 1fr; gap: 3px 8px; align-items: center; font-size: 12px; }
-    #legend i { display: block; width: 16px; height: 14px; border-radius: 3px; }
-    #status { margin-top: 8px; font-size: 12px; color: var(--muted); white-space: pre-line; }
-    #probe {
-      position: absolute; bottom: 24px; left: 10px; z-index: 1; padding: 10px 12px; font-size: 13px;
-      max-width: min(360px, calc(100vw - 20px)); box-sizing: border-box;
-      background: var(--bg); border: 1px solid var(--border); border-radius: 8px; display: none;
-    }
-    #probe h2 { font-size: 15px; margin: 0 0 2px; display: flex; align-items: center; gap: 6px; }
-    #probe .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--border); }
-    #probe .sub { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
-    #probe ul { margin: 0 0 6px; padding-left: 18px; }
-    #probe details { font-size: 12px; color: var(--muted); }
-    #probe details div { font-family: ui-monospace, monospace; white-space: pre-line; margin-top: 4px; }
-    .check { display: flex; align-items: center; gap: 6px; margin: 8px 0 2px; font-size: 12px; color: var(--muted); }
-    .note { font-size: 12px; color: var(--muted); margin: 2px 0 6px; }
-    #days { display: grid; grid-template-columns: repeat(11, 1fr); gap: 2px; margin-top: 4px; }
-    #days button {
-      display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 0; border: 0;
-      background: transparent; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; border-radius: 6px;
-    }
-    #days button i { display: block; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--border); box-sizing: border-box; }
-    #days button[aria-checked=true] { color: var(--fg); font-weight: 600; }
-    #days button[aria-checked=true] i { border-color: var(--fg); }
-    #days button.today { color: var(--fg); }
   </style>
 </head>
 <body>
-  <div id="map"></div>
-  <aside id="panel">
-    <div id="panel-head">
-      <h1>Champis</h1>
-      <button id="toggle" type="button" aria-controls="panel-body" aria-expanded="true" title="Replier le panneau">▴</button>
-    </div>
-    <div id="panel-body">
-    <label for="layer">Couche</label>
-    <select id="layer" disabled><option>Aucune tuile chargée</option></select>
-    <label for="basemap">Fond</label>
-    <select id="basemap">
-      <option value="plan">Plan IGN</option>
-      <option value="ortho">Orthophoto IGN</option>
-      <option value="osm">OpenStreetMap</option>
-    </select>
-    <label class="check"><input id="potential" type="checkbox" /> Afficher le potentiel toute saison</label>
-    <div id="potential-note" class="note" hidden>Potentiel terrain, indépendant de la météo et de la saison.</div>
-    <div id="weather">
-      <label for="api">API</label>
-      <input id="api" type="text" />
-      <label>Jour <span id="day-label"></span></label>
-      <div id="days" role="radiogroup" aria-label="Jour"></div>
-      <div id="weather-status"></div>
-    </div>
-    <label for="opacity">Opacité</label>
-    <input id="opacity" type="range" min="0" max="1" step="0.05" value="0.75" />
-    <div id="drop">
-      Glisser ici des <code>T-*.pmtiles</code> et le <code>A-*.pmtiles</code><br />(ou cliquer pour choisir)
-      <input id="files" type="file" accept=".pmtiles" multiple />
-    </div>
-    <div id="legend"></div>
-    <div id="status"></div>
-    </div>
-  </aside>
-  <div id="probe"></div>
-
+  <header id="site-header"></header>
+  <main class="today">
+    <div id="france" aria-label="Carte de France colorée par l'indice du jour"></div>
+    <aside>
+      <div>
+        <h1 id="title">La France du jour</h1>
+        <p id="sentence" aria-live="polite">Chargement de l'indice du jour…</p>
+        <p id="dept" class="muted small"></p>
+      </div>
+      <label class="small muted" for="group">Groupe</label>
+      <select id="group" disabled><option>Chargement…</option></select>
+      <div>
+        <div class="day-label" id="day-label"></div>
+        <div id="days"></div>
+      </div>
+      <div id="legend"></div>
+      <div class="links">
+        <a href="comprendre.html?article=comment-ca-marche">Comment ça marche<span>Terrain, météo et saison en cinq couleurs</span></a>
+        <a href="comprendre.html?article=cueillir-sans-nuire">Cueillir sans nuire<span>Où l'on a le droit, combien, comment</span></a>
+        <a href="comprendre.html?article=especes#app">L'app Champis<span>Vos coins, et une notification quand c'est bon</span></a>
+      </div>
+      <p class="app-line" id="app-line"></p>
+    </aside>
+  </main>
+  <nav id="site-tabs" aria-label="Pages"></nav>
+  <footer class="site-footer"></footer>
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-  <script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
-  <script src="png.js"></script>
-  <script src="app.js"></script>
+  <script src="site.js"></script>
+  <script src="today.js"></script>
 </body>
 </html>
