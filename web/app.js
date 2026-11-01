@@ -54,8 +54,12 @@ const weather = { today: null, cells: new Map(), error: null };
 // byDept : code → { species: { sid: { date: {value, coverage} } }, groups: { gid: { date: {value, leading, coverage} } } }
 const deptIndex = { today: null, key: null, byDept: new Map(), error: null };
 const franceView = () => mode() === "S" && map.getZoom() < DEPT_ZOOM;
-const mode = () => $("mode").value; // "T" ou "S"
-const dayOffset = () => +$("day").value;
+// refonte UX, lot 2 : le potentiel toute saison est une option, le score du jour la règle
+const mode = () => ($("potential").checked ? "T" : "S"); // "T" ou "S"
+let selectedDay = 0; // J−3 → J+7, choisi dans le bandeau des jours
+const dayOffset = () => selectedDay;
+const DAY_RANGE = [-3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7];
+const WEEKDAYS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
 const WEATHER_BLOCK = 16; // la cellule météo est cherchée par bloc de 16 px, pas par pixel
 
 // ---------------------------------------------------------------- panneau repliable
@@ -331,13 +335,12 @@ function setBasemap(name) {
 /** Départements (contours IGN Admin Express simplifiés, Licence ouverte) colorés par l'indice du jour. */
 function addDeptLayers() {
   map.addSource("depts", { type: "geojson", data: "departements.geojson", promoteId: "code" });
+  // toujours présent, invisible hors vue France : sert aussi à trouver le département sous le centre
   map.addLayer({
     id: "depts-fill",
     type: "fill",
     source: "depts",
-    maxzoom: DEPT_ZOOM,
-    layout: { visibility: "none" },
-    paint: { "fill-color": "#000", "fill-opacity": 0 },
+    paint: { "fill-color": "rgba(0,0,0,0)", "fill-opacity": 0 },
   });
   map.addLayer({
     id: "depts-line",
@@ -359,10 +362,12 @@ function deptSeries(code) {
 /** Recolore les départements pour la couche et le jour courants (aucun appel réseau). */
 function paintDepts() {
   const show = franceView() && deptIndex.key === currentKey && deptIndex.byDept.size > 0;
-  for (const id of ["depts-fill", "depts-line"]) {
-    if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", show ? "visible" : "none");
+  if (map.getLayer("depts-line")) map.setLayoutProperty("depts-line", "visibility", show ? "visible" : "none");
+  if (!show) {
+    if (map.getLayer("depts-fill")) map.setPaintProperty("depts-fill", "fill-opacity", 0);
+    paintDays();
+    return;
   }
-  if (!show) return;
   const date = currentDate();
   const expr = ["match", ["get", "code"]];
   for (const code of deptIndex.byDept.keys()) {
@@ -373,6 +378,68 @@ function paintDepts() {
   expr.push("rgba(0,0,0,0)"); // département sans indice : transparent, jamais une valeur inventée
   map.setPaintProperty("depts-fill", "fill-color", expr.length > 3 ? expr : "rgba(0,0,0,0)");
   map.setPaintProperty("depts-fill", "fill-opacity", +$("opacity").value);
+  paintDays();
+}
+
+/** Département sous le centre de la carte, par les polygones déjà rendus (couche invisible). */
+function centerDept() {
+  if (!map.getLayer("depts-fill")) return null;
+  const f = map.queryRenderedFeatures(map.project(map.getCenter()), { layers: ["depts-fill"] })[0];
+  return f?.properties?.code ?? null;
+}
+
+/** Jour ISO pour un décalage J+k. */
+function dateFor(k) {
+  if (!weather.today) return null;
+  const d = new Date(weather.today + "T12:00:00");
+  d.setDate(d.getDate() + k);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Bandeau des onze jours (lot 2) : une pastille par jour, colorée par l'indice du département
+ *  sous le centre de la carte (GET /departements), le jour de la semaine dessous. */
+function buildDays() {
+  const box = $("days");
+  box.innerHTML = "";
+  for (const k of DAY_RANGE) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("role", "radio");
+    b.dataset.k = k;
+    b.innerHTML = "<i></i><span></span>";
+    b.addEventListener("click", () => {
+      selectedDay = k;
+      updateDayLabel();
+      setLayer(currentKey);
+      paintDepts();
+    });
+    box.appendChild(b);
+  }
+  paintDays();
+}
+
+function paintDays() {
+  const code = deptIndex.byDept.size > 0 && deptIndex.key === currentKey ? centerDept() : null;
+  for (const b of $("days").querySelectorAll("button")) {
+    const k = +b.dataset.k;
+    const iso = dateFor(k);
+    const v = code && iso ? deptSeries(code)?.[iso]?.value : null;
+    const dot = b.querySelector("i");
+    dot.style.background = v === null || v === undefined ? "transparent" : classify(v).hex;
+    b.querySelector("span").textContent = iso ? WEEKDAYS[new Date(iso + "T12:00:00").getDay()] : "";
+    b.setAttribute("aria-checked", k === selectedDay ? "true" : "false");
+    b.classList.toggle("today", k === 0);
+    const label = iso ? frenchDate(iso) : `J${k >= 0 ? "+" : ""}${k}`;
+    b.title = v === null || v === undefined ? label : `${label} : ${classify(v).fr}`;
+    b.setAttribute("aria-label", b.title);
+  }
+}
+
+/** `2026-11-01` → `dim. 1 nov.` */
+function frenchDate(iso) {
+  const d = new Date(iso + "T12:00:00");
+  const months = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
+  return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]}`;
 }
 
 function setLayer(key) {
@@ -398,6 +465,7 @@ function setLayer(key) {
 map.on("load", () => {
   setBasemap($("basemap").value);
   addDeptLayers();
+  buildDays();
   loadPalette()
     .then(() => loadFromQuery() || loadFromApi())
     .catch((e) => ($("status").textContent = e.message));
@@ -413,16 +481,13 @@ $("layer").addEventListener("change", (e) => {
   deptIndex.byDept.clear();
   deptIndex.key = null;
   fetchWeather();
+  fetchDeptIndex(); // le bandeau des jours en a besoin à tout zoom
 });
-$("mode").addEventListener("change", () => {
+$("potential").addEventListener("change", () => {
   $("weather").hidden = mode() !== "S";
+  $("potential-note").hidden = mode() !== "T";
   setLayer(currentKey);
   fetchWeather();
-});
-$("day").addEventListener("input", () => {
-  updateDayLabel();
-  setLayer(currentKey);
-  paintDepts();
 });
 // API : même origine quand la page est servie par champis-api (Railway, uvicorn) ; en dev avec
 // `python -m http.server` sur un autre port, l'API locale par défaut.
@@ -434,15 +499,18 @@ $("api").addEventListener("change", fetchWeather);
 let moveTimer = null;
 map.on("moveend", () => {
   clearTimeout(moveTimer);
-  moveTimer = setTimeout(fetchWeather, 300);
+  moveTimer = setTimeout(() => {
+    fetchWeather();
+    paintDays();
+  }, 300);
 });
 
 // ---------------------------------------------------------------- météo (API)
 
 function updateDayLabel() {
   const d = currentDate();
-  const k = dayOffset();
-  $("day-label").textContent = d ? `${d} (J${k >= 0 ? "+" : ""}${k})` : "";
+  $("day-label").textContent = d ? (dayOffset() === 0 ? `aujourd'hui, ${frenchDate(d)}` : frenchDate(d)) : "";
+  paintDays();
 }
 
 let weatherAbort = null;
@@ -545,10 +613,10 @@ async function fetchDeptIndex() {
         groups: Object.fromEntries(Object.entries(d.groups).map(([gid, rows]) => [gid, toMap(rows)])),
       });
     }
-    if (!weather.today) weather.today = body.today; // le curseur de jour a besoin de J
+    if (!weather.today) weather.today = body.today; // le bandeau des jours a besoin de J
     updateDayLabel();
     paintDepts();
-    $("weather-status").textContent = deptStatus();
+    if (franceView()) $("weather-status").textContent = deptStatus();
   } catch (e) {
     if (e.name === "AbortError") return;
     deptIndex.error = e.message;
@@ -708,6 +776,39 @@ function addFiles(files) {
 // ---------------------------------------------------------------- sonde au clic
 
 const probe = $("probe");
+/** Phrase de terrain depuis le libellé de palette de T : l'API ne connaît pas le pixel (lot 2). */
+function terrainPhrase(t) {
+  const label = classify(t).label;
+  if (label === "excellent") return "terrain très favorable";
+  if (label === "bon") return "terrain favorable";
+  if (label === "moyen") return "terrain moyen";
+  return "terrain peu favorable";
+}
+
+const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+/** Fiche en clair (lot 2) : libellé et jour, espèce, phrases, puis les chiffres derrière Détails. */
+function renderProbe({ value, name, phrases, details }) {
+  const cls = classify(value);
+  const when = dayOffset() === 0 ? "aujourd'hui" : WEEKDAYS[new Date(currentDate() + "T12:00:00").getDay()];
+  const sub = [name, currentDate() ? frenchDate(currentDate()) : ""].filter(Boolean).join(" · ");
+  probe.innerHTML =
+    `<h2><span class="dot" style="background:${cls.hex}"></span>${esc(cls.fr)} ${mode() === "S" ? esc(when) : "toute saison"}</h2>` +
+    `<div class="sub">${esc(sub)}</div>` +
+    (phrases.length ? `<ul>${phrases.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : "") +
+    `<details><summary>Détails</summary><div>${esc(details)}</div></details>`;
+}
+
+/** Phrases météo et saison de `GET /weather` › `summary` pour une cellule, une espèce, un jour, une classe. */
+async function fetchSummary(cellId, sid, altKey) {
+  const q = new URLSearchParams({ cell: cellId, species: sid });
+  const r = await fetch(`${$("api").value.replace(/\/$/, "")}/weather?${q}`);
+  if (!r.ok) return { summary: [], factors: null };
+  const body = await r.json();
+  const row = body.species?.[sid]?.find((d) => d.date === currentDate())?.by_alt?.[altKey];
+  return { summary: row?.summary ?? [], factors: row?.factors ?? null, triggerDays: row?.trigger_days ?? null };
+}
+
 map.on("click", async (e) => {
   if (!currentKey) return;
   if (franceView()) {
@@ -722,10 +823,13 @@ map.on("click", async (e) => {
       probe.textContent = `${f.properties.nom} (${f.properties.code}) : pas d'indice (météo manquante)`;
       return;
     }
-    const lead = row.leading ? ` · ${species.get(row.leading)?.names.fr ?? row.leading}` : "";
-    probe.textContent =
-      `${f.properties.nom} (${f.properties.code}) : indice ${row.value.toFixed(3)} — ${classify(row.value).fr}` +
-      `${lead} · ${currentDate()} · couverture ${(row.coverage * 100).toFixed(0)} %`;
+    const lead = row.leading ? species.get(row.leading)?.names.fr ?? row.leading : "";
+    renderProbe({
+      value: row.value,
+      name: `${f.properties.nom} (${f.properties.code})${lead ? ` · ${lead}` : ""}`,
+      phrases: [`indice du département, pour la forêt entière`, `météo connue sur ${(row.coverage * 100).toFixed(0)} % de la forêt`],
+      details: `indice ${row.value.toFixed(3)} · couverture ${(row.coverage * 100).toFixed(0)} % · ${currentDate()}`,
+    });
     return;
   }
   const z = MAX_ZOOM;
@@ -751,24 +855,38 @@ map.on("click", async (e) => {
   }
   if (!best) {
     probe.textContent = mode() === "S" && arrays.some((a) => !Number.isNaN(a.t[i]))
-      ? "Pas de météo pour ce point"
-      : "Hors forêt / pas de donnée";
+      ? "Pas de météo pour ce secteur aujourd'hui : le serveur réessaie."
+      : "Hors forêt ou pas de donnée ici.";
     return;
   }
   const name = species.get(best.sid)?.names.fr ?? best.sid;
+  const { class_m, nodata } = palette.alt_encoding;
   if (mode() === "T") {
     // sans météo, la classe vient de la couche A seule (pas de cellule pour s'y rabattre)
-    const { class_m, nodata } = palette.alt_encoding;
-    const alt = altIdx !== null && altIdx !== nodata ? ` · altitude ${altIdx * class_m}–${(altIdx + 1) * class_m} m` : "";
-    probe.textContent = `T = ${best.T.toFixed(3)} — ${classify(best.T).fr} (${name})${alt}`;
+    const alt = altIdx !== null && altIdx !== nodata ? `altitude ${altIdx * class_m}–${(altIdx + 1) * class_m} m` : "altitude inconnue";
+    renderProbe({
+      value: best.T,
+      name,
+      phrases: [terrainPhrase(best.T), "potentiel toute saison, sans la météo"],
+      details: `T = ${best.T.toFixed(3)} · ${alt}`,
+    });
     return;
   }
   const cell = nearestCell(e.lngLat.lat, e.lngLat.lng);
   const w = best.v / best.T;
-  const altTxt = altLayer && altIdx !== null && altIdx !== palette.alt_encoding.nodata ? "" : " (médiane cellule)";
-  probe.textContent =
-    `S = ${best.v.toFixed(3)} — ${classify(best.v).fr} (${name}, ${currentDate()}) · ` +
-    `T ${best.T.toFixed(2)} × M_eff·Φ ${w.toFixed(2)} · cellule ${cell.id} · ` +
-    `classe ${altCenter(cell, altIdx)} m${altTxt}` +
-    (cell.stale ? " · météo périmée" : "");
+  const altKey = String(altCenter(cell, altIdx));
+  const altTxt = altLayer && altIdx !== null && altIdx !== nodata ? "" : " (médiane cellule)";
+  renderProbe({ value: best.v, name, phrases: [terrainPhrase(best.T), "météo : chargement…"], details: "…" });
+  const { summary, factors } = await fetchSummary(cell.id, best.sid, altKey);
+  const factorsTxt = factors
+    ? Object.entries(factors).filter(([k]) => k !== "M").map(([k, v]) => `${k} ${(+v).toFixed(2)}`).join(" · ")
+    : "facteurs indisponibles";
+  renderProbe({
+    value: best.v,
+    name,
+    phrases: [terrainPhrase(best.T), ...summary],
+    details:
+      `S = ${best.v.toFixed(3)} · T ${best.T.toFixed(2)} × M_eff·Φ ${w.toFixed(2)} · cellule ${cell.id}` +
+      ` · classe ${altKey} m${altTxt}${cell.stale ? " · météo périmée" : ""}\n${factorsTxt}`,
+  });
 });

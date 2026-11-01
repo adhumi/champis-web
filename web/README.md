@@ -47,3 +47,7 @@ Affichage → « Score du jour » : la page appelle `GET /weather/bbox` sur l'em
 ## Pas de portage du scoring
 
 La page prend `M_eff` et `Φ` tels que l'API les renvoie pour les 11 jours et ne les recalcule pas. Décision du 30 oct. 2026 : le site n'a pas de hors ligne, donc pas de portage JS du scoring ; la parité (skill `scoring-parity`) ne concerne que Python et Swift. Seule la palette est lue dans `shared/`.
+
+## Fiche en clair et bandeau des jours (lot 2, 1er nov. 2026)
+
+La fiche au clic dit d'abord le libellé de la palette et le jour (« Bon aujourd'hui »), l'espèce, la phrase de terrain (déduite du libellé de T) et les phrases de `GET /weather` › `summary` ; les chiffres sont derrière « Détails ». Le jour se choisit dans un bandeau de onze pastilles, colorées par l'indice du département sous le centre de la carte (`GET /departements`, chargé dès le choix de la couche). Le potentiel toute saison est une case à cocher.
