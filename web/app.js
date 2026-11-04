@@ -1,10 +1,13 @@
 /* Page Carte du site (carte.html) : potentiel terrain T (PMTiles gris 8 bits) colorisé côté
  * client avec shared/palette.json, et score du jour S = T × M_eff × Φ avec les valeurs de l'API
- * (/weather/bbox : M_eff et Φ par cellule 5 km, jour et classe d'altitude). Aucune valeur de
- * modèle ici : palette, seuils, encodage des tuiles et noms d'espèces sont lus depuis le dépôt,
- * M et Φ depuis l'API (servir la racine du dépôt, voir README). Dates, légende, bandeau et
- * navigation viennent de site.js (lot 5) ; le glisser-déposer et l'adresse de l'API sont des
- * outils de développement (`?dev=1`). */
+ * (/weather/bbox à partir du zoom 9 : M_eff et Φ par cellule 5 km, onze jours et classe
+ * d'altitude ; /weather/field en dessous : M_eff × Φ du jour courant sur toute l'emprise, spec ›
+ * Points ouverts › Carte visible dès l'ouverture, 4 nov. 2026). Aucune valeur de modèle ici :
+ * palette, seuils, encodage des tuiles et noms d'espèces sont lus depuis le dépôt, M et Φ depuis
+ * l'API (servir la racine du dépôt, voir README). Dates, légende, bandeau et navigation viennent
+ * de site.js (lot 5), la fusion des réponses météo, l'index spatial des cellules et le facteur
+ * d'un pixel de field.js ; le glisser-déposer et l'adresse de l'API sont des outils de
+ * développement (`?dev=1`). */
 
 const TILE = 256;
 const MIN_ZOOM = 6;
@@ -46,10 +49,14 @@ let currentKey = null; // "s:<id>" ou "g:<group>"
 let tileVersion = 0; // incrémenté pour forcer le rendu quand la météo ou le jour change
 const transparentTile = makeTransparentTile();
 
-// Météo : réponse de /weather/bbox pour l'emprise courante.
-// cells : id → { lat, lon, elevation_m, alt_classes, stale, species: { sid: { date: { alt: {M_eff, phi} } } } }
-// covered : dernière emprise entièrement reçue (avec sa marge), sa couche et son heure
-const weather = { today: null, cells: new Map(), error: null, covered: null };
+// Météo : cellules reçues de /weather/bbox (onze jours, à partir du zoom FIELD_ZOOM) et de
+// /weather/field (un jour, en dessous), fusionnées par field.js dans une seule structure :
+// cells : id → { lat, lon, elevation_m, alt_classes, stale, f: { sid: { date: [M_eff × Φ par classe] } } }
+// index : casiers de 0,05° sur `cells`, reconstruit à chaque fusion (cellule la plus proche)
+// covered : dernière emprise entièrement reçue de /weather/bbox (avec sa marge), sa couche, son heure
+// fieldCovered : jour → même chose pour /weather/field, pour que revenir sur un jour déjà vu ne
+// redemande rien (spec › Points ouverts › Carte visible dès l'ouverture, 4 nov. 2026)
+const weather = { today: null, cells: new Map(), index: null, error: null, covered: null, fieldCovered: new Map() };
 // Indice par département (/departements) pour la couche courante : il ne colore que le bandeau des
 // jours (pastille = indice du département sous le centre de la carte). La vue France, où il
 // colorait les départements sous le zoom 9, est retirée (spec › Points ouverts › Vue France et
@@ -61,13 +68,10 @@ const mode = () => ($("potential").checked ? "T" : "S"); // "T" ou "S"
 let selectedDay = 0; // J−3 → J+7, choisi dans le bandeau des jours
 const dayOffset = () => selectedDay;
 const DAY_RANGE = [-3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7];
-const WEATHER_BLOCK = 16; // la cellule météo est cherchée par bloc de 16 px, pas par pixel
+// La cellule météo est cherchée par bloc de pixels, pas par pixel (Field.blockPx : 16 px à partir
+// du zoom 9, moins en dessous), à moins de Field.MAX_CELL_KM (7,5 km), sinon le pixel est
+// transparent plutôt que de prendre la météo d'une cellule chargée pour une autre emprise.
 const OPACITY = 0.75; // opacité fixe de l'overlay (décision du 1er nov. 2026 : plus de réglage)
-// Au-delà de cette distance de la cellule la plus proche (grille de 5 km, `cell_m` de
-// weather_grid.json : une cellule et demie), le pixel n'a pas de météo et reste transparent,
-// plutôt que de prendre celle d'une cellule chargée pour une autre emprise (étude du 4 nov. 2026).
-const MAX_CELL_KM = 7.5;
-const KM_PER_DEG = 111.2;
 // Tuiles décodées gardées en mémoire (T par espèce et A, ≈ 260 Ko chacune) : changer de jour, de
 // mode ou de météo ne relit rien sur le réseau, seule la colorisation est refaite.
 const TILE_CACHE_MAX = 600;
@@ -75,6 +79,7 @@ const TILE_CACHE_MAX = 600;
 // ne réessaie jamais de lui-même et laisserait la tuile blanche.
 const TILE_RETRY_MS = [1500, 3000, 6000];
 const WEATHER_TTL_MS = 30 * 60 * 1000; // une emprise contenue dans la dernière réponse ne redemande rien
+const WEATHER_PAD = 0.1; // marge (°) autour de l'emprise visible : ~ une cellule pour le voisin le plus proche en bord d'écran
 const DEV = Site.isDev(location.search);
 // Vue partagée (`#zoom/lat/lon`) : lue avant que MapLibre n'écrive le sien, on ne la recadre pas.
 const SHARED_VIEW = location.hash.length > 1;
@@ -223,106 +228,60 @@ async function speciesT(key, z, x, y) {
   return list.map((s, i) => ({ sid: s.id, t: ts[i] })).filter((e) => e.t);
 }
 
-/** Valeur affichée par pixel : T (max du groupe) ou S = T × M_eff × Φ (max du groupe, règle 9). */
+/** Valeur affichée par pixel : T (max du groupe) ou S = T × M_eff × Φ (max du groupe, règle 9).
+ *  En mode S, la cellule météo est cherchée une fois par bloc de pixels (Field.tileCells), pour
+ *  toutes les espèces ; le facteur M_eff × Φ est mémorisé par cellule et classe d'altitude, la
+ *  classe étant lue par pixel dans la couche A quand elle est chargée. Un pixel sans cellule à
+ *  moins de 7,5 km, ou dont la cellule n'a pas le jour demandé, reste transparent (jamais 0,5). */
 function combine(arrays, z, x, y, alt) {
   if (arrays.length === 0) return null;
   const out = new Float32Array(TILE * TILE).fill(NaN);
   const useWeather = mode() === "S";
-  const blocks = TILE / WEATHER_BLOCK;
+  const date = currentDate();
+  const block = useWeather ? Field.blockPx(z) : TILE;
+  const blocks = TILE / block;
+  const cells = useWeather ? Field.tileCells(weather.index, z, x, y, TILE, block) : null;
   for (const { sid, t } of arrays) {
-    // cellule météo par bloc de 16 × 16 px (une cellule fait 5 km : largement assez fin) ;
-    // la classe d'altitude, elle, est lue par pixel dans la couche A quand elle est chargée
-    let w = null;
-    if (useWeather) {
-      w = [];
-      for (let by = 0; by < blocks; by++) {
-        for (let bx = 0; bx < blocks; bx++) {
-          const [lon, lat] = tilePixelToLngLat(z, x, y, (bx + 0.5) * WEATHER_BLOCK, (by + 0.5) * WEATHER_BLOCK);
-          const r = weatherRow(sid, lat, lon);
-          w.push(r ? { ...r, byClass: new Map() } : null);
+    const memo = useWeather ? new Map() : null; // cellule → Map(classe → facteur)
+    for (let py = 0; py < TILE; py++) {
+      const rowBlock = Math.floor(py / block) * blocks;
+      for (let px = 0; px < TILE; px++) {
+        const i = py * TILE + px;
+        let v = t[i];
+        if (Number.isNaN(v)) continue;
+        if (useWeather) {
+          const cell = cells[rowBlock + Math.floor(px / block)];
+          if (!cell) continue; // pas de météo pour ce pixel : transparent, jamais 0,5
+          const k = alt ? alt[i] : null;
+          let byClass = memo.get(cell);
+          if (!byClass) memo.set(cell, (byClass = new Map()));
+          let f = byClass.get(k);
+          if (f === undefined) {
+            f = Field.factor(cell, sid, date, Field.altCenter(cell, k, palette.alt_encoding));
+            byClass.set(k, f);
+          }
+          if (f === null) continue;
+          v *= f;
         }
+        if (Number.isNaN(out[i]) || v > out[i]) out[i] = v;
       }
-    }
-    for (let i = 0; i < t.length; i++) {
-      let v = t[i];
-      if (Number.isNaN(v)) continue;
-      if (w) {
-        const r = w[Math.floor(i / TILE / WEATHER_BLOCK) * blocks + Math.floor((i % TILE) / WEATHER_BLOCK)];
-        if (!r) continue; // pas de météo pour ce pixel : transparent, jamais 0,5
-        const k = alt ? alt[i] : null;
-        let f = r.byClass.get(k);
-        if (f === undefined) {
-          f = factorAt(r, k);
-          r.byClass.set(k, f);
-        }
-        if (f === null) continue;
-        v *= f;
-      }
-      if (Number.isNaN(out[i]) || v > out[i]) out[i] = v;
     }
   }
   return out;
 }
 
-function tilePixelToLngLat(z, x, y, px, py) {
-  const n = 2 ** z;
-  const lon = ((x + px / TILE) / n) * 360 - 180;
-  const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + py / TILE)) / n))) * 180) / Math.PI;
-  return [lon, lat];
-}
-
-/** Cellule météo la plus proche et sa ligne (par classe d'altitude) pour l'espèce et le jour ; null si inconnu. */
-function weatherRow(sid, lat, lon) {
-  const cell = nearestCell(lat, lon);
-  const row = cell?.species[sid]?.[currentDate()];
-  return row ? { cell, row } : null;
-}
-
-/** Centre (m) de la classe d'altitude à utiliser parmi celles que l'API a calculées pour la cellule :
- *  celle du pixel (indice k de la couche A) ; sans couche A ou altitude inconnue, celle de
- *  l'altitude médiane de la forêt de la cellule. */
-function altCenter(cell, k) {
-  const { class_m, nodata } = palette.alt_encoding;
-  const alt = k === null || k === undefined || k === nodata ? cell.elevation_m : (k + 0.5) * class_m;
-  const target = Math.floor(alt / class_m) * class_m + class_m / 2;
-  return cell.alt_classes.reduce((a, b) => (Math.abs(b - target) < Math.abs(a - target) ? b : a));
-}
-
-/** M_eff × Φ d'une ligne météo pour la classe d'altitude du pixel ; null si l'API ne l'a pas. */
-function factorAt({ cell, row }, k) {
-  const v = row[String(altCenter(cell, k))];
-  return v ? v.M_eff * v.phi : null;
-}
-
 /** M_eff × Φ de l'espèce pour un point et un indice de classe d'altitude (null = inconnu). */
 function weatherFactor(sid, lat, lon, k) {
-  const r = weatherRow(sid, lat, lon);
-  return r ? factorAt(r, k) : null;
-}
-
-/** Cellule météo la plus proche à moins de MAX_CELL_KM, sinon null (pixel sans météo : transparent). */
-function nearestCell(lat, lon) {
-  let best = null;
-  let bestD = (MAX_CELL_KM / KM_PER_DEG) ** 2;
-  const k = Math.cos((lat * Math.PI) / 180);
-  for (const c of weather.cells.values()) {
-    const d = (c.lat - lat) ** 2 + ((c.lon - lon) * k) ** 2;
-    if (d < bestD) {
-      bestD = d;
-      best = c;
-    }
-  }
-  return best;
+  const cell = Field.nearestCell(weather.index, lat, lon);
+  return cell ? Field.factor(cell, sid, currentDate(), Field.altCenter(cell, k, palette.alt_encoding)) : null;
 }
 
 function currentDate() {
-  if (!weather.today) return null;
-  const d = new Date(weather.today + "T12:00:00");
-  d.setDate(d.getDate() + dayOffset());
-  return d.toISOString().slice(0, 10);
+  return Site.dateFor(weather.today, dayOffset());
 }
 
-async function colorize(t) {
+/** Classes → pixels colorés sur un canevas (synchrone) ; l'encodage PNG est à part (asynchrone). */
+function paint(t) {
   const c = new OffscreenCanvas(TILE, TILE);
   const ctx = c.getContext("2d");
   const img = ctx.createImageData(TILE, TILE);
@@ -332,8 +291,10 @@ async function colorize(t) {
     img.data.set([r, g, b, 255], i * 4);
   }
   ctx.putImageData(img, 0, 0);
-  return (await c.convertToBlob({ type: "image/png" })).arrayBuffer();
+  return c;
 }
+
+const encodePng = async (canvas) => (await canvas.convertToBlob({ type: "image/png" })).arrayBuffer();
 
 if (typeof maplibregl === "undefined" || typeof pmtiles === "undefined") {
   $("weather-status").textContent = "La carte ne s'est pas chargée : vérifiez la connexion puis rechargez la page.";
@@ -357,9 +318,32 @@ maplibregl.addProtocol("champis", async (params) => {
     if (DEV) $("status").textContent = $("status").textContent.replace(/\n?\d+ tuile\(s\) en échec$/, "") + `\n${tileFailures} tuile(s) en échec`;
     return { data: await transparentTile };
   }
+  const t0 = performance.now();
   const v = combine(arrays, z, x, y, alt);
-  return { data: v ? await colorize(v) : await transparentTile };
+  const t1 = performance.now();
+  const canvas = v ? paint(v) : null;
+  if (DEV) noteRender(t1 - t0, performance.now() - t1);
+  return { data: canvas ? await encodePng(canvas) : await transparentTile };
 });
+
+// Temps processeur de colorisation (combine : météo et max du groupe par pixel ; peinture :
+// classes → pixels, hors encodage PNG asynchrone), affiché en mode dev : « Colorisation : N
+// tuiles, X ms » pour vérifier qu'un écran au zoom 6 tient sous la seconde.
+const renderStats = { tiles: 0, ms: 0, combineMs: 0 };
+let renderStatsTimer = null;
+function noteRender(combineMs, paintMs) {
+  renderStats.tiles++;
+  renderStats.combineMs += combineMs;
+  renderStats.ms += combineMs + paintMs;
+  clearTimeout(renderStatsTimer);
+  renderStatsTimer = setTimeout(() => {
+    const line = `Colorisation : ${renderStats.tiles} tuile(s), ${renderStats.ms.toFixed(0)} ms (dont météo ${renderStats.combineMs.toFixed(0)} ms)`;
+    const st = $("status");
+    st.textContent = /^Colorisation : /m.test(st.textContent)
+      ? st.textContent.replace(/^Colorisation : .*$/m, line)
+      : `${st.textContent}\n${line}`;
+  }, 200);
+}
 
 // ---------------------------------------------------------------- carte
 
@@ -368,6 +352,7 @@ const map = new maplibregl.Map({
   style: { version: 8, sources: {}, layers: [] },
   center: [6.35, 47.1], // Doubs
   zoom: 9,
+  minZoom: MIN_ZOOM, // les tuiles T existent dès le niveau 6 : en dessous, rien à colorer
   hash: true,
   attributionControl: { compact: false },
 });
@@ -428,7 +413,9 @@ function paintDays() {
     onSelect: (k) => {
       selectedDay = k;
       updateDayLabel(); // redessine aussi le bandeau
-      setLayer(currentKey);
+      // sous FIELD_ZOOM, le jour peut demander un champ ; au-dessus, bbox a déjà les onze jours
+      if (mode() === "S") fetchWeather();
+      else setLayer(currentKey);
     },
   });
   const layer = $("layer");
@@ -506,14 +493,31 @@ function updateDayLabel() {
   paintDays();
 }
 
-/** L'emprise demandée tient-elle dans la dernière réponse complète, pour la même couche, de
- *  moins de WEATHER_TTL_MS ? (même règle que `MapModel.weatherAlreadyCovers` dans l'app) */
-function weatherCovers(box) {
-  const c = weather.covered;
-  if (!c || c.key !== currentKey || Date.now() - c.at > WEATHER_TTL_MS) return false;
-  return box[0] >= c.box[0] && box[1] >= c.box[1] && box[2] <= c.box[2] && box[3] <= c.box[3];
+/** L'emprise demandée tient-elle dans une réponse complète déjà reçue pour la même couche, de
+ *  moins de WEATHER_TTL_MS : la dernière de /weather/bbox (onze jours, à tout zoom), ou, sous
+ *  FIELD_ZOOM, le champ du jour courant ? (même règle que `MapModel.weatherAlreadyCovers` dans
+ *  l'app). Au-dessus du seuil, un champ ne dispense pas de bbox : il colore en attendant, mais
+ *  les autres jours du bandeau viennent de bbox. */
+function weatherCovers(box, useField) {
+  const now = Date.now();
+  return (
+    Field.covers(weather.covered, box, currentKey, now, WEATHER_TTL_MS) ||
+    (useField && Field.covers(weather.fieldCovered.get(currentDate()), box, currentKey, now, WEATHER_TTL_MS))
+  );
 }
 
+/** Heure de calcul du champ, pour le mode dev : « mer. 4 nov. à 15:15 » (heure locale). */
+function computedAtText(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = (n) => String(n).padStart(2, "0");
+  return `${frenchDate(Field.localToday(d))} à ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Météo de l'emprise visible (plus WEATHER_PAD) pour la couche courante : /weather/bbox à
+ *  partir de FIELD_ZOOM (onze jours), /weather/field en dessous (le seul jour du bandeau, sans
+ *  plafond de cellules). Les deux sont fusionnées dans `weather.cells` par field.js, puis la
+ *  couche est recolorisée depuis le cache de tuiles (setLayer). */
 let weatherAbort = null;
 let retryTimer = null;
 async function fetchWeather() {
@@ -522,56 +526,64 @@ async function fetchWeather() {
   const ids = layerSpecies(currentKey).map((s) => s.id);
   if (ids.length === 0) return;
   const b = map.getBounds();
-  const pad = 0.1; // ~ une cellule de marge pour le voisin le plus proche en bord d'écran
-  const box = [b.getWest() - pad, b.getSouth() - pad, b.getEast() + pad, b.getNorth() + pad];
-  if (weatherCovers(box)) {
-    setLayer(currentKey); // zoom avant ou petit déplacement : les cellules sont déjà là
+  const box = [b.getWest() - WEATHER_PAD, b.getSouth() - WEATHER_PAD, b.getEast() + WEATHER_PAD, b.getNorth() + WEATHER_PAD];
+  const useField = Field.weatherSource(map.getZoom()) === "field";
+  if (weatherCovers(box, useField)) {
+    setLayer(currentKey); // zoom avant, petit déplacement ou jour déjà reçu : les cellules sont déjà là
     return;
   }
+  // sous le seuil, le jour du bandeau ; avant la première réponse, `today` est inconnu : le jour
+  // civil local, et la réponse (`today`, `day`) remet le bandeau d'aplomb
+  const guessed = useField && !currentDate();
+  const day = useField ? currentDate() ?? Field.localToday() : null;
   weatherAbort?.abort();
   weatherAbort = new AbortController();
   const q = new URLSearchParams({ min_lon: box[0], min_lat: box[1], max_lon: box[2], max_lat: box[3] });
   for (const id of ids) q.append("species", id);
+  if (day) q.set("day", day);
+  const key = currentKey;
   $("weather-status").textContent = "Météo : chargement…";
   try {
-    const r = await fetch(`${$("api").value.replace(/\/$/, "")}/weather/bbox?${q}`, {
+    const r = await fetch(`${$("api").value.replace(/\/$/, "")}/weather/${useField ? "field" : "bbox"}?${q}`, {
       signal: weatherAbort.signal,
     });
     if (!r.ok) throw new Error(`${r.status} ${(await r.json()).detail ?? ""}`);
     const body = await r.json();
     weather.today = body.today;
     weather.error = null;
-    for (const c of body.cells) {
-      const entry = weather.cells.get(c.cell.id) ?? {
-        ...c.cell,
-        species: {},
-      };
-      entry.stale = c.stale;
-      for (const [sid, rows] of Object.entries(c.species)) {
-        entry.species[sid] = Object.fromEntries(rows.map((row) => [row.date, row.by_alt]));
-      }
-      weather.cells.set(c.cell.id, entry);
+    const got = useField ? Field.mergeField(weather.cells, body) : Field.mergeBbox(weather.cells, body);
+    weather.index = Field.buildIndex(weather.cells);
+    if (useField) {
+      // servi depuis le précalcul : les cellules manquantes arriveront avec la prochaine
+      // pré-chauffe, le TTL suffit à les redemander
+      weather.fieldCovered.set(body.day, { box, key, at: Date.now() });
+    } else {
+      weather.covered = got.missing ? null : { box, key, at: Date.now() };
     }
-    const stale = body.cells.some((c) => c.stale);
-    const missing = body.unavailable?.length ?? 0;
-    weather.covered = missing ? null : { box, key: currentKey, at: Date.now() };
     const notes = [
-      stale ? "Météo du dernier passage : le serveur n'a pas pu la rafraîchir." : "",
-      missing ? `Météo manquante sur une partie de l'emprise${body.retry_after ? `, nouvel essai dans ${body.retry_after} s` : ""}.` : "",
+      got.stale ? "Météo du dernier passage : le serveur n'a pas pu la rafraîchir." : "",
+      got.missing
+        ? useField
+          ? `Météo manquante sur ${got.missing} cellule(s).`
+          : `Météo manquante sur une partie de l'emprise${body.retry_after ? `, nouvel essai dans ${body.retry_after} s` : ""}.`
+        : "",
     ].filter(Boolean);
-    $("weather-status").textContent = DEV
-      ? [`Météo : ${body.cells.length} cellule(s) dans l'emprise`, ...notes].join(" — ")
-      : notes.join(" ");
-    if (missing && body.retry_after && body.retry_after <= 120) {
+    const devLine = useField
+      ? `Météo à grande échelle : ${got.count} cellule(s), calculée le ${computedAtText(body.computed_at)}`
+      : `Météo : ${got.count} cellule(s) dans l'emprise`;
+    $("weather-status").textContent = DEV ? [devLine, ...notes].join(" — ") : notes.join(" ");
+    if (!useField && got.missing && body.retry_after && body.retry_after <= 120) {
       clearTimeout(retryTimer);
       retryTimer = setTimeout(fetchWeather, body.retry_after * 1000 + 500);
     }
     updateDayLabel();
+    if (guessed && body.day !== currentDate()) return fetchWeather(); // le jour deviné n'était pas J : une fois
     setLayer(currentKey);
   } catch (e) {
     if (e.name === "AbortError") return;
     weather.error = e.message;
     $("weather-status").textContent = `Météo indisponible : ${e.message}`;
+    setLayer(currentKey); // ce qu'on sait déjà (transparent ailleurs), plutôt que l'image d'un autre jour
   }
 }
 
@@ -658,12 +670,13 @@ async function addMany(items) {
   }
   refreshLayerList();
   if (first && species.size > 0 && !SHARED_VIEW) {
-    // Sans vue France, la carte s'ouvre à un zoom où la parcelle se lit : on garde la vue de
-    // départ si le jeu la couvre, sinon on cadre le jeu (un seul département, par exemple).
+    // La carte s'ouvre sur la vue de départ (le Doubs, à un zoom où la parcelle se lit) si le jeu
+    // la couvre, sinon elle cadre le jeu (un seul département, par exemple) : la carte est colorée
+    // à tout zoom ≥ MIN_ZOOM (minZoom de la carte), plus besoin de borner le cadrage au zoom 9.
     const b = [...species.values()][0].bounds;
     const c = map.getCenter();
     const covered = c.lng >= b[0] && c.lng <= b[2] && c.lat >= b[1] && c.lat <= b[3];
-    if (!covered) map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 20, duration: 0, maxZoom: 9 });
+    if (!covered) map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 20, duration: 0 });
   }
   $("status").textContent = [
     `${species.size} espèce(s) : ${[...species.values()].map((s) => s.names.fr).join(", ")}`,
@@ -849,9 +862,11 @@ map.on("click", async (e) => {
     });
     return;
   }
-  const cell = nearestCell(e.lngLat.lat, e.lngLat.lng);
+  // sous FIELD_ZOOM, M_eff × Φ vient du champ du jour ; les phrases et les facteurs, de
+  // GET /weather?cell= dans les deux cas
+  const cell = Field.nearestCell(weather.index, e.lngLat.lat, e.lngLat.lng);
   const w = best.v / best.T;
-  const altKey = String(altCenter(cell, altIdx));
+  const altKey = String(Field.altCenter(cell, altIdx, palette.alt_encoding));
   const altTxt = altLayer && altIdx !== null && altIdx !== nodata ? "" : " (médiane cellule)";
   renderProbe({ value: best.v, name, phrases: [terrainPhrase(best.T), "météo : chargement…"], details: "…" });
   const { summary, factors } = await fetchSummary(cell.id, best.sid, altKey);
