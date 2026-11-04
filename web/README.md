@@ -26,7 +26,7 @@ Les pages appellent l'API à leur propre origine (`Site.apiBase`). En statique d
 
 ## Mode développement : `?dev=1`
 
-Sur la carte, `?dev=1` affiche l'adresse de l'API, le glisser-déposer de fichiers PMTiles (`data/tiles/T-*.pmtiles` et le `A-300m-*.pmtiles`, l'espèce est déduite du nom) et les diagnostics (fichiers chargés depuis le bucket, nombre de cellules météo). Avec un serveur qui gère `Range`, les tuiles passent aussi en URL : `carte.html?tiles=../data/tiles/T-….pmtiles,…`.
+Sur la carte, `?dev=1` affiche l'adresse de l'API, le glisser-déposer de fichiers PMTiles (`data/tiles/T-*.pmtiles` et le `A-300m-*.pmtiles`, l'espèce est déduite du nom) et les diagnostics (fichiers chargés depuis le bucket, nombre de cellules météo). Les entrées `kind: "G"` du manifeste (un PMTiles par groupe, 4 nov. 2026) sont ignorées par la page tant que les clients ne sont pas passés aux G : elles ne comptent pas comme des erreurs. Avec un serveur qui gère `Range`, les tuiles passent aussi en URL : `carte.html?tiles=../data/tiles/T-….pmtiles,…`.
 
 ## Score du jour (API)
 

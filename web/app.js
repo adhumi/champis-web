@@ -734,7 +734,9 @@ async function loadFromApi() {
   // Plusieurs jeux de départements peuvent coexister dans le bucket (Doubs seul, France…) ; une
   // espèce n'a qu'une couche à la fois : on garde le jeu qui couvre le plus de départements.
   const dh = pickDeptsHash(body);
-  const tiles = body.tiles.filter((t) => t.depts_hash === dh);
+  // Seuls les T (une espèce) et le A sont lus ici ; les G (un fichier par groupe, 4 nov. 2026) et
+  // tout kind inconnu sont ignorés sans compter comme une erreur de chargement.
+  const tiles = body.tiles.filter((t) => t.depts_hash === dh && (t.kind === "T" || t.kind === "A"));
   const items = tiles.map((t) => ({
     src: /^https?:/.test(t.url) ? t.url : `${base}${t.url}`,
     label: t.name,
