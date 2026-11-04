@@ -51,7 +51,8 @@ const transparentTile = makeTransparentTile();
 
 // Météo : réponse de /weather/bbox pour l'emprise courante.
 // cells : id → { lat, lon, elevation_m, alt_classes, stale, species: { sid: { date: { alt: {M_eff, phi} } } } }
-const weather = { today: null, cells: new Map(), error: null };
+// covered : dernière emprise entièrement reçue (avec sa marge), sa couche et son heure
+const weather = { today: null, cells: new Map(), error: null, covered: null };
 // Vue France : réponse de /departements pour la couche courante.
 // byDept : code → { species: { sid: { date: {value, coverage} } }, groups: { gid: { date: {value, leading, coverage} } } }
 const deptIndex = { today: null, key: null, byDept: new Map(), error: null };
@@ -63,6 +64,18 @@ const dayOffset = () => selectedDay;
 const DAY_RANGE = [-3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7];
 const WEATHER_BLOCK = 16; // la cellule météo est cherchée par bloc de 16 px, pas par pixel
 const OPACITY = 0.75; // opacité fixe de l'overlay (décision du 1er nov. 2026 : plus de réglage)
+// Au-delà de cette distance de la cellule la plus proche (grille de 5 km, `cell_m` de
+// weather_grid.json : une cellule et demie), le pixel n'a pas de météo et reste transparent,
+// plutôt que de prendre celle d'une cellule chargée pour une autre emprise (étude du 4 nov. 2026).
+const MAX_CELL_KM = 7.5;
+const KM_PER_DEG = 111.2;
+// Tuiles décodées gardées en mémoire (T par espèce et A, ≈ 260 Ko chacune) : changer de jour, de
+// mode ou de météo ne relit rien sur le réseau, seule la colorisation est refaite.
+const TILE_CACHE_MAX = 600;
+// Lecture d'une tuile en échec (429 du limiteur, réseau) : réessais avant d'abandonner, MapLibre
+// ne réessaie jamais de lui-même et laisserait la tuile blanche.
+const TILE_RETRY_MS = [1500, 3000, 6000];
+const WEATHER_TTL_MS = 30 * 60 * 1000; // une emprise contenue dans la dernière réponse ne redemande rien
 const DEV = Site.isDev(location.search);
 
 // ---------------------------------------------------------------- navigation et panneau
@@ -146,11 +159,47 @@ async function decodeAlt(buf) {
   return out;
 }
 
+// ---------------------------------------------------------------- cache et lecture des tuiles
+
+const tileCache = new Map(); // "<fichier>|z/x/y" → Promise<Float32Array | Uint8Array | null>, ordre LRU
+let tileFailures = 0; // tuiles abandonnées après réessais (affiché en mode dev)
+
+/** Promesse mise en cache par clé ; une lecture en échec est retirée pour être retentée plus tard. */
+function cachedTile(key, load) {
+  let p = tileCache.get(key);
+  if (p) {
+    tileCache.delete(key); // remis en fin de Map : le plus ancien est évincé en premier
+    tileCache.set(key, p);
+    return p;
+  }
+  p = load().catch((e) => {
+    tileCache.delete(key);
+    throw e;
+  });
+  tileCache.set(key, p);
+  if (tileCache.size > TILE_CACHE_MAX) tileCache.delete(tileCache.keys().next().value);
+  return p;
+}
+
+/** Octets d'une tuile d'un PMTiles (null si absente), avec réessais sur erreur réseau ou 429. */
+async function tileBytes(pm, z, x, y) {
+  for (let i = 0; ; i++) {
+    try {
+      return (await pm.getZxy(z, x, y))?.data ?? null;
+    } catch (e) {
+      if (i >= TILE_RETRY_MS.length) throw e;
+      await new Promise((r) => setTimeout(r, TILE_RETRY_MS[i]));
+    }
+  }
+}
+
 /** Indices de classe d'altitude de la tuile, ou null sans couche A (ou hors de son emprise). */
-async function altTile(z, x, y) {
-  if (!altLayer) return null;
-  const t = await altLayer.pm.getZxy(z, x, y);
-  return t?.data ? decodeAlt(t.data) : null;
+function altTile(z, x, y) {
+  if (!altLayer) return Promise.resolve(null);
+  return cachedTile(`${altLayer.label}|${z}/${x}/${y}`, async () => {
+    const data = await tileBytes(altLayer.pm, z, x, y);
+    return data ? decodeAlt(data) : null;
+  });
 }
 
 function layerSpecies(key) {
@@ -159,14 +208,18 @@ function layerSpecies(key) {
   return [...species.values()].filter((s) => s.group?.id === name);
 }
 
-/** T de chaque espèce de la couche sur une tuile : [{ sid, t: Float32Array }]. */
+/** T de chaque espèce de la couche sur une tuile, lues en parallèle : [{ sid, t: Float32Array }]. */
 async function speciesT(key, z, x, y) {
-  const out = [];
-  for (const s of layerSpecies(key)) {
-    const t = await s.pm.getZxy(z, x, y);
-    if (t?.data) out.push({ sid: s.id, t: await decodeT(t.data) });
-  }
-  return out;
+  const list = layerSpecies(key);
+  const ts = await Promise.all(
+    list.map((s) =>
+      cachedTile(`${s.label}|${z}/${x}/${y}`, async () => {
+        const data = await tileBytes(s.pm, z, x, y);
+        return data ? decodeT(data) : null;
+      })
+    )
+  );
+  return list.map((s, i) => ({ sid: s.id, t: ts[i] })).filter((e) => e.t);
 }
 
 /** Valeur affichée par pixel : T (max du groupe) ou S = T × M_eff × Φ (max du groupe, règle 9). */
@@ -246,9 +299,10 @@ function weatherFactor(sid, lat, lon, k) {
   return r ? factorAt(r, k) : null;
 }
 
+/** Cellule météo la plus proche à moins de MAX_CELL_KM, sinon null (pixel sans météo : transparent). */
 function nearestCell(lat, lon) {
   let best = null;
-  let bestD = Infinity;
+  let bestD = (MAX_CELL_KM / KM_PER_DEG) ** 2;
   const k = Math.cos((lat * Math.PI) / 180);
   for (const c of weather.cells.values()) {
     const d = (c.lat - lat) ** 2 + ((c.lon - lon) * k) ** 2;
@@ -289,8 +343,19 @@ maplibregl.addProtocol("champis", async (params) => {
   const m = params.url.match(/^champis:\/\/([^/]+)\/v\d+\/(\d+)\/(\d+)\/(\d+)$/);
   if (!m) throw new Error(`URL invalide : ${params.url}`);
   const [z, x, y] = [+m[2], +m[3], +m[4]];
-  const arrays = await speciesT(m[1], z, x, y);
-  const alt = arrays.length && mode() === "S" ? await altTile(z, x, y) : null;
+  let arrays;
+  let alt;
+  try {
+    // T des espèces et A en parallèle (cache mémoire : une lecture réseau par fichier et par tuile)
+    [arrays, alt] = await Promise.all([speciesT(m[1], z, x, y), mode() === "S" ? altTile(z, x, y) : null]);
+  } catch (e) {
+    // Après les réessais : tuile transparente plutôt qu'en erreur. MapLibre ne redemande jamais une
+    // tuile en erreur ; celle-ci sera relue au prochain rendu (déplacement, jour, météo).
+    ++tileFailures;
+    console.warn(`tuile ${z}/${x}/${y} abandonnée : ${e.message}`);
+    if (DEV) $("status").textContent = $("status").textContent.replace(/\n?\d+ tuile\(s\) en échec$/, "") + `\n${tileFailures} tuile(s) en échec`;
+    return { data: await transparentTile };
+  }
   const v = combine(arrays, z, x, y, alt);
   return { data: v ? await colorize(v) : await transparentTile };
 });
@@ -345,6 +410,7 @@ function deptSeries(code) {
 
 /** Recolore les départements pour la couche et le jour courants (aucun appel réseau). */
 function paintDepts() {
+  updateTileVisibility();
   const show = franceView() && deptIndex.key === currentKey && deptIndex.byDept.size > 0;
   if (map.getLayer("depts-line")) map.setLayoutProperty("depts-line", "visibility", show ? "visible" : "none");
   if (!show) {
@@ -401,24 +467,37 @@ function paintDays() {
 
 const frenchDate = Site.frenchDate;
 
+/** Couche de tuiles à (re)rendre pour la clé, le jour, le mode et la météo courants. La source
+ *  n'est jamais recréée : `setTiles` avec une nouvelle version fait recharger les tuiles en gardant
+ *  l'image précédente à l'écran jusqu'à la suivante (plus de carte vidée carré par carré), et les
+ *  octets viennent du cache mémoire. */
 function setLayer(key) {
   currentKey = key;
-  if (map.getLayer("T")) map.removeLayer("T");
-  if (map.getSource("T")) map.removeSource("T");
-  if (!key) return;
-  map.addSource("T", {
-    type: "raster",
-    tiles: [`champis://${key}/v${++tileVersion}/{z}/{x}/{y}`],
-    tileSize: TILE,
-    minzoom: MIN_ZOOM,
-    maxzoom: MAX_ZOOM,
-  });
-  map.addLayer({
-    id: "T",
-    type: "raster",
-    source: "T",
-    paint: { "raster-opacity": OPACITY, "raster-resampling": "nearest" },
-  });
+  if (!key) {
+    updateTileVisibility();
+    return;
+  }
+  const url = `champis://${key}/v${++tileVersion}/{z}/{x}/{y}`;
+  const src = map.getSource("T");
+  if (src) {
+    src.setTiles([url]);
+  } else {
+    map.addSource("T", { type: "raster", tiles: [url], tileSize: TILE, minzoom: MIN_ZOOM, maxzoom: MAX_ZOOM });
+    map.addLayer({
+      id: "T",
+      type: "raster",
+      source: "T",
+      paint: { "raster-opacity": OPACITY, "raster-resampling": "nearest" },
+    });
+  }
+  updateTileVisibility();
+}
+
+/** En vue France (mode S sous le zoom 9), la couche de tuiles est cachée : aucune requête de tuile
+ *  et rien de dessiné par-dessus les départements. */
+function updateTileVisibility() {
+  if (!map.getLayer("T")) return;
+  map.setLayoutProperty("T", "visibility", currentKey && !franceView() ? "visible" : "none");
 }
 
 map.on("load", () => {
@@ -439,7 +518,7 @@ $("layer").addEventListener("change", (e) => {
   fetchDeptIndex(); // le bandeau des jours en a besoin à tout zoom
 });
 $("potential").addEventListener("change", () => {
-  $("weather").hidden = mode() !== "S";
+  $("weather-status").hidden = mode() !== "S";
   $("potential-note").hidden = mode() !== "T";
   setLayer(currentKey);
   fetchWeather();
@@ -464,6 +543,14 @@ function updateDayLabel() {
   paintDays();
 }
 
+/** L'emprise demandée tient-elle dans la dernière réponse complète, pour la même couche, de
+ *  moins de WEATHER_TTL_MS ? (même règle que `MapModel.weatherAlreadyCovers` dans l'app) */
+function weatherCovers(box) {
+  const c = weather.covered;
+  if (!c || c.key !== currentKey || Date.now() - c.at > WEATHER_TTL_MS) return false;
+  return box[0] >= c.box[0] && box[1] >= c.box[1] && box[2] <= c.box[2] && box[3] <= c.box[3];
+}
+
 let weatherAbort = null;
 let retryTimer = null;
 async function fetchWeather() {
@@ -479,16 +566,16 @@ async function fetchWeather() {
   paintDepts(); // cache la vue France si on vient de zoomer
   const ids = layerSpecies(currentKey).map((s) => s.id);
   if (ids.length === 0) return;
-  weatherAbort?.abort();
-  weatherAbort = new AbortController();
   const b = map.getBounds();
   const pad = 0.1; // ~ une cellule de marge pour le voisin le plus proche en bord d'écran
-  const q = new URLSearchParams({
-    min_lon: b.getWest() - pad,
-    min_lat: b.getSouth() - pad,
-    max_lon: b.getEast() + pad,
-    max_lat: b.getNorth() + pad,
-  });
+  const box = [b.getWest() - pad, b.getSouth() - pad, b.getEast() + pad, b.getNorth() + pad];
+  if (weatherCovers(box)) {
+    setLayer(currentKey); // zoom avant ou petit déplacement : les cellules sont déjà là
+    return;
+  }
+  weatherAbort?.abort();
+  weatherAbort = new AbortController();
+  const q = new URLSearchParams({ min_lon: box[0], min_lat: box[1], max_lon: box[2], max_lat: box[3] });
   for (const id of ids) q.append("species", id);
   $("weather-status").textContent = "Météo : chargement…";
   try {
@@ -512,6 +599,7 @@ async function fetchWeather() {
     }
     const stale = body.cells.some((c) => c.stale);
     const missing = body.unavailable?.length ?? 0;
+    weather.covered = missing ? null : { box, key: currentKey, at: Date.now() };
     const notes = [
       stale ? "Météo du dernier passage : le serveur n'a pas pu la rafraîchir." : "",
       missing ? `Météo manquante sur une partie de l'emprise${body.retry_after ? `, nouvel essai dans ${body.retry_after} s` : ""}.` : "",
@@ -603,6 +691,7 @@ async function addSource(src, label) {
   species.set(id, {
     id,
     pm,
+    label, // clé du cache de tuiles : le nom du fichier porte le hash de l'espèce et du jeu
     names: meta?.names ?? { fr: id, la: "" },
     group: meta?.group ?? null,
     bounds: [header.minLon, header.minLat, header.maxLon, header.maxLat],

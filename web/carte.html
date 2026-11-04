@@ -34,7 +34,9 @@
     #status { white-space: pre-line; margin-top: 6px; }
     #mobile-controls { display: none; }
     @media (max-width: 719px) {
-      main.carte { grid-template-columns: 1fr; height: calc(100vh - var(--nav-h)); }
+      /* plein écran : 100dvh suit la barre d'adresse d'iOS Safari ; le pied de page passe sous la carte */
+      main.carte { grid-template-columns: 1fr; height: calc(100vh - var(--nav-h)); height: calc(100dvh - var(--nav-h)); }
+      footer.site-footer { display: none; }
       #map-col { height: 100%; }
       #panel { position: absolute; z-index: 5; top: 8px; left: 8px; right: 8px; border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; gap: 8px; max-height: 60%; }
       #panel.collapsed > :not(#mobile-controls) { display: none; }

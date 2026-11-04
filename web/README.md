@@ -43,6 +43,16 @@ La page appelle `GET /weather/bbox` sur l'emprise visible et colorise `T × M_ef
 - `today.js`, `comprendre.js` : l'accueil et Comprendre.
 - Position de la carte dans l'URL (`#zoom/lat/lon`) pour partager une vue.
 
+## Rendu des tuiles (étude du 4 nov. 2026)
+
+- **Cache mémoire des tuiles décodées** (`T` par espèce et `A`, LRU de 600 entrées, clé = nom du fichier PMTiles + z/x/y) : changer de jour, de mode ou de météo ne relit rien sur le réseau, seule la colorisation est refaite.
+- **La source MapLibre n'est jamais recréée** : `setTiles` avec une nouvelle version recharge les tuiles en gardant l'image précédente à l'écran (plus de carte vidée carré par carré).
+- **Lectures en parallèle** (espèces du groupe + `A`) avec trois réessais (1,5 / 3 / 6 s) sur 429 ou erreur réseau ; après quoi la tuile est rendue transparente et relue au prochain rendu, parce que MapLibre ne redemande jamais une tuile en erreur.
+- **Cellule météo à moins de 7,5 km** (une cellule et demie de la grille de 5 km) ; au-delà, pixel transparent : jamais la météo d'une cellule chargée pour une autre emprise.
+- **Vue France sans tuiles** : sous le zoom 9 en mode score, la couche est masquée (`visibility: none`), aucune requête.
+- **Météo** : une emprise contenue dans la dernière réponse complète de la même couche, de moins de 30 min, ne redemande rien (comme l'app).
+- Côté API, le relais `/tiles/<nom>` et les fichiers statiques sont hors limitation de débit (`RATE_LIMIT_EXEMPT` dans `app.py`) : un écran vaut 75 à 150 requêtes Range.
+
 ## Pas de portage du scoring
 
 La page prend `M_eff` et `Φ` tels que l'API les renvoie et ne les recalcule pas (décision du 30 oct. 2026 : pas de hors ligne sur le web, donc pas de portage JS ; la parité ne concerne que Python et Swift). Les phrases en clair viennent de `GET /weather` › `summary`, les mêmes que l'app.
