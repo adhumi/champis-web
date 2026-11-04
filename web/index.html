@@ -7,53 +7,49 @@
   <title>Champis — la France du jour</title>
   <link rel="icon" href="logo.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="site.css" />
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
   <style>
-    .today { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; padding: 20px; max-width: 1200px; margin: 0 auto; width: 100%; }
-    #france { position: relative; aspect-ratio: 1 / 1; max-height: calc(100vh - 140px); border-radius: var(--radius); border: 1px solid var(--border); background: var(--panel); overflow: hidden; }
-    #france .maplibregl-ctrl-attrib { font-size: 10px; }
-    .today aside { display: flex; flex-direction: column; gap: 14px; }
-    .today h1 { font-size: 1.35rem; }
-    #sentence { font-size: 1.05rem; }
+    .today { display: flex; flex-direction: column; gap: 16px; max-width: 680px; margin: 0 auto; width: 100%; padding: 24px 20px 40px; }
+    .today h1 { font-size: 1.6rem; }
+    #sentence { font-size: 1.15rem; }
     #group { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); }
+    .strip { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
     .links { display: flex; flex-direction: column; gap: 8px; }
     .links a { text-decoration: none; color: var(--fg); padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); }
     .links a span { display: block; color: var(--muted); font-size: .875rem; }
-    #dept { min-height: 1.5em; }
+    .links a.primary { border-color: var(--accent); }
+    #note:empty { display: none; }
     @media (max-width: 719px) {
-      .today { grid-template-columns: 1fr; padding: 12px; gap: 12px; }
-      #france { max-height: 60vh; }
+      .today { padding: 12px 12px 24px; gap: 12px; }
     }
   </style>
 </head>
 <body>
   <header id="site-header"></header>
   <main class="today">
-    <div id="france" aria-label="Carte de France colorée par l'indice du jour"></div>
-    <aside>
-      <div>
-        <h1 id="title">La France du jour</h1>
-        <p id="sentence" aria-live="polite">Chargement de l'indice du jour…</p>
-        <p id="dept" class="muted small"></p>
-      </div>
+    <div>
+      <h1 id="title">La France du jour</h1>
+      <p id="sentence" aria-live="polite">Chargement de l'indice du jour…</p>
+      <p id="note" class="muted small"></p>
+    </div>
+    <div>
       <label class="small muted" for="group">Groupe</label>
       <select id="group" disabled><option>Chargement…</option></select>
-      <div>
-        <div class="day-label" id="day-label"></div>
-        <div id="days"></div>
-      </div>
-      <div id="legend"></div>
-      <div class="links">
-        <a href="comprendre.html?article=comment-ca-marche">Comment ça marche<span>Terrain, météo et saison en cinq couleurs</span></a>
-        <a href="comprendre.html?article=cueillir-sans-nuire">Cueillir sans nuire<span>Où l'on a le droit, combien, comment</span></a>
-        <a href="comprendre.html?article=especes#app">L'app Champis<span>Vos coins, et une notification quand c'est bon</span></a>
-      </div>
-      <p class="app-line" id="app-line"></p>
-    </aside>
+    </div>
+    <div class="strip">
+      <div class="day-label" id="day-label"></div>
+      <div id="days"></div>
+    </div>
+    <div id="legend"></div>
+    <div class="links">
+      <a class="primary" href="carte.html">Voir la carte<span>Le score du jour à la parcelle, à 25 m</span></a>
+      <a href="comprendre.html?article=comment-ca-marche">Comment ça marche<span>Terrain, météo et saison en cinq couleurs</span></a>
+      <a href="comprendre.html?article=cueillir-sans-nuire">Cueillir sans nuire<span>Où l'on a le droit, combien, comment</span></a>
+      <a href="comprendre.html?article=especes#app">L'app Champis<span>Vos coins, et une notification quand c'est bon</span></a>
+    </div>
+    <p class="app-line" id="app-line"></p>
   </main>
   <nav id="site-tabs" aria-label="Pages"></nav>
   <footer class="site-footer"></footer>
-  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="site.js"></script>
   <script src="today.js"></script>
 </body>

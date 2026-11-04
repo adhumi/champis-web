@@ -9,9 +9,6 @@
 const TILE = 256;
 const MIN_ZOOM = 6;
 const MAX_ZOOM = 15;
-// En dessous de ce zoom, en mode S, la carte passe à la vue France : départements colorés par
-// l'indice `GET /departements` (section Scoring) au lieu des cellules météo (plafond de 40 par emprise).
-const DEPT_ZOOM = 9;
 
 const BASEMAPS = {
   plan: {
@@ -53,10 +50,12 @@ const transparentTile = makeTransparentTile();
 // cells : id → { lat, lon, elevation_m, alt_classes, stale, species: { sid: { date: { alt: {M_eff, phi} } } } }
 // covered : dernière emprise entièrement reçue (avec sa marge), sa couche et son heure
 const weather = { today: null, cells: new Map(), error: null, covered: null };
-// Vue France : réponse de /departements pour la couche courante.
+// Indice par département (/departements) pour la couche courante : il ne colore que le bandeau des
+// jours (pastille = indice du département sous le centre de la carte). La vue France, où il
+// colorait les départements sous le zoom 9, est retirée (spec › Points ouverts › Vue France et
+// indice par département, 4 nov. 2026) : la couche de tuiles reste visible à tout zoom ≥ MIN_ZOOM.
 // byDept : code → { species: { sid: { date: {value, coverage} } }, groups: { gid: { date: {value, leading, coverage} } } }
-const deptIndex = { today: null, key: null, byDept: new Map(), error: null };
-const franceView = () => mode() === "S" && map.getZoom() < DEPT_ZOOM;
+const deptIndex = { key: null, byDept: new Map(), error: null };
 // refonte UX, lot 2 : le potentiel toute saison est une option, le score du jour la règle
 const mode = () => ($("potential").checked ? "T" : "S"); // "T" ou "S"
 let selectedDay = 0; // J−3 → J+7, choisi dans le bandeau des jours
@@ -77,6 +76,8 @@ const TILE_CACHE_MAX = 600;
 const TILE_RETRY_MS = [1500, 3000, 6000];
 const WEATHER_TTL_MS = 30 * 60 * 1000; // une emprise contenue dans la dernière réponse ne redemande rien
 const DEV = Site.isDev(location.search);
+// Vue partagée (`#zoom/lat/lon`) : lue avant que MapLibre n'écrive le sien, on ne la recadre pas.
+const SHARED_VIEW = location.hash.length > 1;
 
 // ---------------------------------------------------------------- navigation et panneau
 
@@ -381,23 +382,16 @@ function setBasemap(name) {
   map.addLayer({ id: "basemap", type: "raster", source: "basemap" }, above);
 }
 
-/** Départements (contours IGN Admin Express simplifiés, Licence ouverte) colorés par l'indice du jour. */
-function addDeptLayers() {
+/** Limites des départements (contours IGN Admin Express simplifiés, Licence ouverte) : une couche
+ *  invisible, chargée une fois, qui ne sert qu'à trouver le département sous le centre de la carte
+ *  pour le bandeau des jours (aucun appel réseau par déplacement). */
+function addDeptSource() {
   map.addSource("depts", { type: "geojson", data: "departements.geojson", promoteId: "code" });
-  // toujours présent, invisible hors vue France : sert aussi à trouver le département sous le centre
   map.addLayer({
     id: "depts-fill",
     type: "fill",
     source: "depts",
     paint: { "fill-color": "rgba(0,0,0,0)", "fill-opacity": 0 },
-  });
-  map.addLayer({
-    id: "depts-line",
-    type: "line",
-    source: "depts",
-    maxzoom: DEPT_ZOOM,
-    layout: { visibility: "none" },
-    paint: { "line-color": "rgba(0,0,0,.35)", "line-width": 0.8 },
   });
 }
 
@@ -406,29 +400,6 @@ function deptSeries(code) {
   if (!d || !currentKey) return null;
   const [kind, name] = currentKey.split(":");
   return (kind === "g" ? d.groups[name] : d.species[name]) ?? null;
-}
-
-/** Recolore les départements pour la couche et le jour courants (aucun appel réseau). */
-function paintDepts() {
-  updateTileVisibility();
-  const show = franceView() && deptIndex.key === currentKey && deptIndex.byDept.size > 0;
-  if (map.getLayer("depts-line")) map.setLayoutProperty("depts-line", "visibility", show ? "visible" : "none");
-  if (!show) {
-    if (map.getLayer("depts-fill")) map.setPaintProperty("depts-fill", "fill-opacity", 0);
-    paintDays();
-    return;
-  }
-  const date = currentDate();
-  const expr = ["match", ["get", "code"]];
-  for (const code of deptIndex.byDept.keys()) {
-    const v = deptSeries(code)?.[date]?.value;
-    if (v === null || v === undefined) continue;
-    expr.push(code, classify(v).hex);
-  }
-  expr.push("rgba(0,0,0,0)"); // département sans indice : transparent, jamais une valeur inventée
-  map.setPaintProperty("depts-fill", "fill-color", expr.length > 3 ? expr : "rgba(0,0,0,0)");
-  map.setPaintProperty("depts-fill", "fill-opacity", OPACITY);
-  paintDays();
 }
 
 /** Département sous le centre de la carte, par les polygones déjà rendus (couche invisible). */
@@ -456,9 +427,8 @@ function paintDays() {
     valueFor: (iso) => (code ? deptSeries(code)?.[iso]?.value ?? null : null),
     onSelect: (k) => {
       selectedDay = k;
-      updateDayLabel();
+      updateDayLabel(); // redessine aussi le bandeau
       setLayer(currentKey);
-      paintDepts();
     },
   });
   const layer = $("layer");
@@ -467,16 +437,13 @@ function paintDays() {
 
 const frenchDate = Site.frenchDate;
 
-/** Couche de tuiles à (re)rendre pour la clé, le jour, le mode et la météo courants. La source
- *  n'est jamais recréée : `setTiles` avec une nouvelle version fait recharger les tuiles en gardant
- *  l'image précédente à l'écran jusqu'à la suivante (plus de carte vidée carré par carré), et les
- *  octets viennent du cache mémoire. */
+/** Couche de tuiles à (re)rendre pour la clé, le jour, le mode et la météo courants, visible à
+ *  tout zoom ≥ MIN_ZOOM. La source n'est jamais recréée : `setTiles` avec une nouvelle version
+ *  fait recharger les tuiles en gardant l'image précédente à l'écran jusqu'à la suivante (plus de
+ *  carte vidée carré par carré), et les octets viennent du cache mémoire. */
 function setLayer(key) {
   currentKey = key;
-  if (!key) {
-    updateTileVisibility();
-    return;
-  }
+  if (!key) return;
   const url = `champis://${key}/v${++tileVersion}/{z}/{x}/{y}`;
   const src = map.getSource("T");
   if (src) {
@@ -490,19 +457,11 @@ function setLayer(key) {
       paint: { "raster-opacity": OPACITY, "raster-resampling": "nearest" },
     });
   }
-  updateTileVisibility();
-}
-
-/** En vue France (mode S sous le zoom 9), la couche de tuiles est cachée : aucune requête de tuile
- *  et rien de dessiné par-dessus les départements. */
-function updateTileVisibility() {
-  if (!map.getLayer("T")) return;
-  map.setLayoutProperty("T", "visibility", currentKey && !franceView() ? "visible" : "none");
 }
 
 map.on("load", () => {
   setBasemap($("basemap").value);
-  addDeptLayers();
+  addDeptSource();
   buildDays();
   loadPalette()
     .then(() => loadFromQuery() || loadFromApi())
@@ -529,10 +488,14 @@ $("api").addEventListener("change", fetchWeather);
 let moveTimer = null;
 map.on("moveend", () => {
   clearTimeout(moveTimer);
-  moveTimer = setTimeout(() => {
-    fetchWeather();
-    paintDays();
-  }, 300);
+  moveTimer = setTimeout(fetchWeather, 300); // redessine aussi le bandeau (département sous le centre)
+});
+// Les limites arrivent souvent après l'indice : le bandeau se redessine une fois qu'elles sont là.
+let deptsReady = false;
+map.on("sourcedata", (e) => {
+  if (deptsReady || e.sourceId !== "depts" || !e.isSourceLoaded) return;
+  deptsReady = true;
+  paintDays();
 });
 
 // ---------------------------------------------------------------- météo (API)
@@ -554,16 +517,8 @@ function weatherCovers(box) {
 let weatherAbort = null;
 let retryTimer = null;
 async function fetchWeather() {
-  if (mode() !== "S" || !currentKey) {
-    paintDepts();
-    return;
-  }
-  if (franceView()) {
-    weatherAbort?.abort();
-    await fetchDeptIndex();
-    return;
-  }
-  paintDepts(); // cache la vue France si on vient de zoomer
+  paintDays();
+  if (mode() !== "S" || !currentKey) return;
   const ids = layerSpecies(currentKey).map((s) => s.id);
   if (ids.length === 0) return;
   const b = map.getBounds();
@@ -620,29 +575,29 @@ async function fetchWeather() {
   }
 }
 
-/** `GET /departements` pour la couche courante : 11 jours d'un coup, le curseur de jour ne
- *  recharge rien. Les espèces demandées sont celles de la couche (espèce seule ou groupe). */
+/** `GET /departements` pour la couche courante, pour le seul bandeau des jours : 11 jours d'un
+ *  coup, le curseur de jour ne recharge rien, un déplacement non plus (le département sous le
+ *  centre se lit dans les polygones déjà là). Les espèces demandées sont celles de la couche
+ *  (espèce seule ou groupe). Sans indice, les pastilles restent vides : rien d'inventé. */
 let deptAbort = null;
 async function fetchDeptIndex() {
+  if (!currentKey) return;
   const ids = layerSpecies(currentKey).map((s) => s.id);
   if (ids.length === 0) return;
   if (deptIndex.key === currentKey && deptIndex.byDept.size > 0) {
-    paintDepts();
-    $("weather-status").textContent = deptStatus();
+    paintDays();
     return;
   }
   deptAbort?.abort();
   deptAbort = new AbortController();
   const q = new URLSearchParams();
   for (const id of ids) q.append("species", id);
-  $("weather-status").textContent = "Vue France : chargement de l'indice par département…";
   try {
     const r = await fetch(`${$("api").value.replace(/\/$/, "")}/departements?${q}`, {
       signal: deptAbort.signal,
     });
     if (!r.ok) throw new Error(`${r.status} ${(await r.json()).detail ?? ""}`);
     const body = await r.json();
-    deptIndex.today = body.today;
     deptIndex.key = currentKey;
     deptIndex.error = null;
     deptIndex.byDept.clear();
@@ -654,23 +609,13 @@ async function fetchDeptIndex() {
       });
     }
     if (!weather.today) weather.today = body.today; // le bandeau des jours a besoin de J
-    updateDayLabel();
-    paintDepts();
-    if (franceView()) $("weather-status").textContent = deptStatus();
+    updateDayLabel(); // redessine aussi le bandeau
   } catch (e) {
     if (e.name === "AbortError") return;
     deptIndex.error = e.message;
-    $("weather-status").textContent = `Vue France indisponible : ${e.message}`;
+    console.warn(`GET /departements : ${e.message}`);
+    if (DEV) $("status").textContent += `\nBandeau des jours sans indice (GET /departements : ${e.message})`;
   }
-}
-
-function deptStatus() {
-  const n = deptIndex.byDept.size;
-  const date = currentDate();
-  const covered = [...deptIndex.byDept.keys()].filter((c) => deptSeries(c)?.[date]?.value != null).length;
-  return DEV
-    ? `Vue France : indice par département (${covered}/${n} couverts) — zoomez pour la parcelle`
-    : "Vue par département : zoomez pour voir la parcelle.";
 }
 
 // ---------------------------------------------------------------- chargement des PMTiles
@@ -712,9 +657,13 @@ async function addMany(items) {
     }
   }
   refreshLayerList();
-  if (first && species.size > 0) {
+  if (first && species.size > 0 && !SHARED_VIEW) {
+    // Sans vue France, la carte s'ouvre à un zoom où la parcelle se lit : on garde la vue de
+    // départ si le jeu la couvre, sinon on cadre le jeu (un seul département, par exemple).
     const b = [...species.values()][0].bounds;
-    map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 20, duration: 0 });
+    const c = map.getCenter();
+    const covered = c.lng >= b[0] && c.lng <= b[2] && c.lat >= b[1] && c.lat <= b[3];
+    if (!covered) map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 20, duration: 0, maxZoom: 9 });
   }
   $("status").textContent = [
     `${species.size} espèce(s) : ${[...species.values()].map((s) => s.names.fr).join(", ")}`,
@@ -728,6 +677,7 @@ async function addMany(items) {
   }
   if (currentKey) setLayer(currentKey); // une couche A ajoutée après coup change le rendu S
   fetchWeather();
+  fetchDeptIndex(); // le bandeau des jours, à tout zoom
   return loaded;
 }
 
@@ -859,27 +809,6 @@ async function fetchSummary(cellId, sid, altKey) {
 
 map.on("click", async (e) => {
   if (!currentKey) return;
-  if (franceView()) {
-    const f = map.queryRenderedFeatures(e.point, { layers: ["depts-fill"] })[0];
-    probe.style.display = "block";
-    if (!f) {
-      probe.textContent = "Hors département";
-      return;
-    }
-    const row = deptSeries(f.properties.code)?.[currentDate()];
-    if (!row || row.value === null) {
-      probe.textContent = `${f.properties.nom} (${f.properties.code}) : pas d'indice (météo manquante)`;
-      return;
-    }
-    const lead = row.leading ? species.get(row.leading)?.names.fr ?? row.leading : "";
-    renderProbe({
-      value: row.value,
-      name: `${f.properties.nom} (${f.properties.code})${lead ? ` · ${lead}` : ""}`,
-      phrases: [`indice du département, pour la forêt entière`, `météo connue sur ${(row.coverage * 100).toFixed(0)} % de la forêt`],
-      details: `indice ${row.value.toFixed(3)} · couverture ${(row.coverage * 100).toFixed(0)} % · ${currentDate()}`,
-    });
-    return;
-  }
   const z = MAX_ZOOM;
   const n = TILE * 2 ** z;
   const lat = (e.lngLat.lat * Math.PI) / 180;

@@ -4,7 +4,7 @@ Quatre pages statiques, sans build (MapLibre GL et PMTiles par CDN), servies par
 
 | Page | Rôle |
 | --- | --- |
-| `index.html` (Aujourd'hui) | La France colorée par l'indice du jour de `GET /departements` pour le groupe choisi (Cèpes par défaut), le bandeau des onze jours (pastille = meilleure classe atteinte en France ce jour-là), une phrase de saison (`Site.seasonSentence`), la légende, trois liens. Un clic sur un département donne son libellé et un lien vers la carte. |
+| `index.html` (Aujourd'hui) | Une phrase de saison (`Site.seasonSentence`) calculée depuis l'indice du jour de `GET /departements` pour le groupe choisi (Cèpes par défaut), le bandeau des onze jours (pastille = meilleure classe atteinte en France ce jour-là), la légende, les liens (carte, Comprendre, app). Plus de carte des départements ni de MapLibre sur cette page (spec › Points ouverts › Vue France et indice par département, 4 nov. 2026). |
 | `carte.html` (Carte) | La carte à la parcelle de la phase 1, alignée sur l'app : panneau fixe à droite (360 px) sur ordinateur, plein écran sur téléphone (panneau replié en haut, bandeau en bas, fiche en panneau coulissant). Opacité fixe, fond de carte dans le panneau, fiche en clair avec « Détails ». |
 | `comprendre.html` (Comprendre) | Les articles de `shared/texts/` (Markdown rendu par `Site.renderMarkdown`) et les fiches d'espèces du bloc `about` de `GET /species` (`?article=especes&espece=<id>`), en colonne de lecture de 680 px. |
 | `soutenir.html` | Page de dons sobre. Le lien de paiement est `Site.SUPPORT_URL` dans `site.js` (`null` tant qu'Adrien ne l'a pas renseigné : la page explique en attendant). |
@@ -34,12 +34,12 @@ La page appelle `GET /weather/bbox` sur l'emprise visible et colorise `T × M_ef
 
 **Classe d'altitude du pixel** : l'API renvoie `M_eff` et `Φ` par classe de 300 m ; la page choisit la classe du pixel grâce à la couche `A-300m-….pmtiles` quand elle est chargée, sinon repli sur l'altitude médiane de la forêt de la cellule (`elevation_m`), indiqué « (médiane cellule) » dans Détails. Largeur de classe et nodata viennent de `shared/palette.json` (`alt_encoding`).
 
-**Vue France** : sous le zoom 9 en mode score, la carte colore les départements par l'indice de `GET /departements` (même palette, même bandeau). Contours : `web/departements.geojson`, Admin Express IGN simplifié via [france-geojson](https://github.com/gregoiredavid/france-geojson), Licence ouverte.
+**Plus de vue France** (décision du 4 nov. 2026, spec › Points ouverts › Vue France et indice par département) : la couche de tuiles reste visible à tout zoom ≥ 6, la carte ne colore plus les départements. `GET /departements` ne sert plus qu'au bandeau des jours (pastille = indice du département sous le centre de la carte, pour la couche affichée) ; le département sous le centre se lit dans une couche invisible de `web/departements.geojson` (Admin Express IGN simplifié via [france-geojson](https://github.com/gregoiredavid/france-geojson), Licence ouverte), chargée une fois, sans appel réseau par déplacement. À l'ouverture, la carte garde sa vue de départ (ou celle de l'URL) si le jeu publié la couvre, sinon elle cadre le jeu, au plus au zoom 9.
 
 ## Ce que fait le code
 
 - `site.js` : fonctions pures partagées (dates en français sans locale, classes de la palette, phrase de saison, Markdown, adresse de l'API) exportées pour node, plus la navigation, la légende et le bandeau des jours côté navigateur. Testé par `web/tests/test_site.py`.
-- `app.js` : la carte (couche par espèce ou max du groupe, colorisation côté client, météo, vue France, fiche en clair). `png.js` décode les PNG de données octet par octet, jamais par canvas (Safari trame les gris) ; testé par `web/tests/test_png_decoder.py`.
+- `app.js` : la carte (couche par espèce ou max du groupe, colorisation côté client, météo, bandeau des jours, fiche en clair). `png.js` décode les PNG de données octet par octet, jamais par canvas (Safari trame les gris) ; testé par `web/tests/test_png_decoder.py`.
 - `today.js`, `comprendre.js` : l'accueil et Comprendre.
 - Position de la carte dans l'URL (`#zoom/lat/lon`) pour partager une vue.
 
@@ -49,7 +49,7 @@ La page appelle `GET /weather/bbox` sur l'emprise visible et colorise `T × M_ef
 - **La source MapLibre n'est jamais recréée** : `setTiles` avec une nouvelle version recharge les tuiles en gardant l'image précédente à l'écran (plus de carte vidée carré par carré).
 - **Lectures en parallèle** (espèces du groupe + `A`) avec trois réessais (1,5 / 3 / 6 s) sur 429 ou erreur réseau ; après quoi la tuile est rendue transparente et relue au prochain rendu, parce que MapLibre ne redemande jamais une tuile en erreur.
 - **Cellule météo à moins de 7,5 km** (une cellule et demie de la grille de 5 km) ; au-delà, pixel transparent : jamais la météo d'une cellule chargée pour une autre emprise.
-- **Vue France sans tuiles** : sous le zoom 9 en mode score, la couche est masquée (`visibility: none`), aucune requête.
+- **Vue France retirée** (4 nov. 2026) : plus de départements colorés sous le zoom 9, la couche de tuiles reste visible à tout zoom (sous le zoom 6, rien n'est demandé : les PMTiles commencent au niveau 6).
 - **Météo** : une emprise contenue dans la dernière réponse complète de la même couche, de moins de 30 min, ne redemande rien (comme l'app).
 - Côté API, le relais `/tiles/<nom>` et les fichiers statiques sont hors limitation de débit (`RATE_LIMIT_EXEMPT` dans `app.py`) : un écran vaut 75 à 150 requêtes Range.
 
