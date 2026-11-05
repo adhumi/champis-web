@@ -1,13 +1,16 @@
-/* Page Carte du site (carte.html) : potentiel terrain T (PMTiles gris 8 bits) colorisé côté
- * client avec shared/palette.json, et score du jour S = T × M_eff × Φ avec les valeurs de l'API
+/* Page Carte du site (carte.html) : potentiel terrain T (PMTiles gris 8 bits par espèce, ou un
+ * PMTiles RGBA par groupe d'affichage — G — dès qu'il est publié, spec › Points ouverts › Les
+ * clients lisent les PMTiles par groupe, 5 nov. 2026) colorisé côté client avec
+ * shared/palette.json, et score du jour S = T × M_eff × Φ avec les valeurs de l'API
  * (/weather/bbox à partir du zoom 9 : M_eff et Φ par cellule 5 km, onze jours et classe
  * d'altitude ; /weather/field en dessous : M_eff × Φ du jour courant sur toute l'emprise, spec ›
  * Points ouverts › Carte visible dès l'ouverture, 4 nov. 2026). Aucune valeur de modèle ici :
  * palette, seuils, encodage des tuiles et noms d'espèces sont lus depuis le dépôt, M et Φ depuis
  * l'API (servir la racine du dépôt, voir README). Dates, légende, bandeau et navigation viennent
  * de site.js (lot 5), la fusion des réponses météo, l'index spatial des cellules et le facteur
- * d'un pixel de field.js ; le glisser-déposer et l'adresse de l'API sont des outils de
- * développement (`?dev=1`). */
+ * d'un pixel de field.js, la séparation des canaux d'un G et le plan de lecture d'une couche de
+ * groups.js ; le glisser-déposer et l'adresse de l'API sont des outils de développement
+ * (`?dev=1`). */
 
 const TILE = 256;
 const MIN_ZOOM = 6;
@@ -43,7 +46,12 @@ const $ = (id) => document.getElementById(id);
 
 let palette; // shared/palette.json
 let classes; // seuils triés décroissants avec rgb pré-parsé
-const species = new Map(); // id → { pm, names, group }
+const species = new Map(); // id → { pm (null si l'espèce n'a que son G), label, names, group, bounds }
+// Fichiers G du jeu courant : clé "<groupe>" ou "<groupe>-<partie>" → { id, group, pm, label,
+// species: [ids dans l'ordre des canaux], bounds }. Quand toutes les espèces demandées d'une couche
+// ont un canal dans un G, une seule tuile G est lue pour elles (2 requêtes Range par tuile avec A,
+// au lieu de 5 pour les cèpes) ; sinon, repli sur les T. La page marche dans les deux cas.
+const groups = new Map();
 let altLayer = null; // PMTiles A (classes d'altitude) : { pm, label }, commun à toutes les espèces
 let currentKey = null; // "s:<id>" ou "g:<group>"
 let tileVersion = 0; // incrémenté pour forcer le rendu quand la météo ou le jour change
@@ -72,8 +80,9 @@ const DAY_RANGE = [-3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7];
 // du zoom 9, moins en dessous), à moins de Field.MAX_CELL_KM (7,5 km), sinon le pixel est
 // transparent plutôt que de prendre la météo d'une cellule chargée pour une autre emprise.
 const OPACITY = 0.75; // opacité fixe de l'overlay (décision du 1er nov. 2026 : plus de réglage)
-// Tuiles décodées gardées en mémoire (T par espèce et A, ≈ 260 Ko chacune) : changer de jour, de
-// mode ou de météo ne relit rien sur le réseau, seule la colorisation est refaite.
+// Tuiles décodées gardées en mémoire (T par espèce et A, ≈ 260 Ko chacune ; une tuile G compte
+// pour autant d'unités que de canaux, ses quatre T restant ensemble dans l'entrée) : changer de
+// jour, de mode ou de météo ne relit rien sur le réseau, seule la colorisation est refaite.
 const TILE_CACHE_MAX = 600;
 // Lecture d'une tuile en échec (429 du limiteur, réseau) : réessais avant d'abandonner, MapLibre
 // ne réessaie jamais de lui-même et laisserait la tuile blanche.
@@ -165,25 +174,47 @@ async function decodeAlt(buf) {
   return out;
 }
 
+/** PNG RGBA d'un G → un Float32Array de T par canal (NaN = nodata du canal) ; l'alpha est une
+ *  donnée, jamais une transparence (`group_tile_encoding` de la palette). */
+async function decodeG(buf) {
+  const enc = palette.group_tile_encoding;
+  const { width, height, channels, data } = await decodePng(buf);
+  if (width !== TILE || height !== TILE) throw new Error(`Tuile ${width}×${height}, attendu ${TILE}`);
+  const expected = Groups.channelCount(enc);
+  if (channels !== expected) throw new Error(`Tuile G à ${channels} canaux, attendu ${expected} (${enc.channels})`);
+  return Groups.channelsToT(data, channels, enc);
+}
+
 // ---------------------------------------------------------------- cache et lecture des tuiles
 
-const tileCache = new Map(); // "<fichier>|z/x/y" → Promise<Float32Array | Uint8Array | null>, ordre LRU
+// "<fichier>|z/x/y" → { p: Promise<Float32Array | Float32Array[] | Uint8Array | null>, w: poids }, ordre LRU
+const tileCache = new Map();
+let tileCacheWeight = 0;
 let tileFailures = 0; // tuiles abandonnées après réessais (affiché en mode dev)
 
-/** Promesse mise en cache par clé ; une lecture en échec est retirée pour être retentée plus tard. */
-function cachedTile(key, load) {
-  let p = tileCache.get(key);
-  if (p) {
+function evictTile(key) {
+  const e = tileCache.get(key);
+  if (!e) return;
+  tileCache.delete(key);
+  tileCacheWeight -= e.w;
+}
+
+/** Promesse mise en cache par clé ; une lecture en échec est retirée pour être retentée plus tard.
+ *  `weight` : unités de TILE_CACHE_MAX que l'entrée occupe (1 par tableau de 256 × 256). */
+function cachedTile(key, load, weight = 1) {
+  const e = tileCache.get(key);
+  if (e) {
     tileCache.delete(key); // remis en fin de Map : le plus ancien est évincé en premier
-    tileCache.set(key, p);
-    return p;
+    tileCache.set(key, e);
+    return e.p;
   }
-  p = load().catch((e) => {
-    tileCache.delete(key);
-    throw e;
+  const p = load().catch((err) => {
+    evictTile(key);
+    throw err;
   });
-  tileCache.set(key, p);
-  if (tileCache.size > TILE_CACHE_MAX) tileCache.delete(tileCache.keys().next().value);
+  tileCache.set(key, { p, w: weight });
+  tileCacheWeight += weight;
+  while (tileCacheWeight > TILE_CACHE_MAX && tileCache.size > 1) evictTile(tileCache.keys().next().value);
   return p;
 }
 
@@ -208,24 +239,61 @@ function altTile(z, x, y) {
   });
 }
 
+/** Les T des canaux d'une tuile G (Float32Array[] gardés ensemble), ou null si la tuile est
+ *  absente du fichier : une lecture réseau par fichier G et par tuile, quelle que soit l'espèce. */
+function groupTile(g, z, x, y) {
+  return cachedTile(
+    `${g.label}|${z}/${x}/${y}`,
+    async () => {
+      const data = await tileBytes(g.pm, z, x, y);
+      return data ? decodeG(data) : null;
+    },
+    g.species.length
+  );
+}
+
+/** T d'une espèce depuis son propre fichier T (null sans fichier ou hors de son emprise). */
+function singleTile(s, z, x, y) {
+  if (!s?.pm) return Promise.resolve(null);
+  return cachedTile(`${s.label}|${z}/${x}/${y}`, async () => {
+    const data = await tileBytes(s.pm, z, x, y);
+    return data ? decodeT(data) : null;
+  });
+}
+
 function layerSpecies(key) {
   const [kind, name] = key.split(":");
   if (kind === "s") return [species.get(name)].filter(Boolean);
   return [...species.values()].filter((s) => s.group?.id === name);
 }
 
-/** T de chaque espèce de la couche sur une tuile, lues en parallèle : [{ sid, t: Float32Array }]. */
+/** T de chaque espèce de la couche sur une tuile, lues en parallèle : [{ sid, t: Float32Array }],
+ *  dans l'ordre de `layerSpecies`. Une espèce qui a un canal dans un G chargé est lue dans ce G
+ *  (une seule lecture par fichier G, partagée par ses espèces), les autres dans leur T : le
+ *  résultat a la même forme dans les deux cas, `combine`, la colorisation et la sonde au clic ne
+ *  voient pas la différence. */
 async function speciesT(key, z, x, y) {
   const list = layerSpecies(key);
-  const ts = await Promise.all(
-    list.map((s) =>
-      cachedTile(`${s.label}|${z}/${x}/${y}`, async () => {
-        const data = await tileBytes(s.pm, z, x, y);
-        return data ? decodeT(data) : null;
-      })
-    )
-  );
-  return list.map((s, i) => ({ sid: s.id, t: ts[i] })).filter((e) => e.t);
+  const { grouped, single } = Groups.plan(list.map((s) => s.id), groups.values());
+  const reads = [
+    ...grouped.map(({ group, picks }) =>
+      groupTile(group, z, x, y).then((chs) => picks.map(({ sid, channel }) => [sid, chs ? chs[channel] : null]))
+    ),
+    ...single.map((sid) => singleTile(species.get(sid), z, x, y).then((t) => [[sid, t]])),
+  ];
+  const bySid = new Map((await Promise.all(reads)).flat());
+  return list.map((s) => ({ sid: s.id, t: bySid.get(s.id) ?? null })).filter((e) => e.t);
+}
+
+const nCanaux = (n) => `${n} ${n > 1 ? "canaux" : "canal"}`;
+
+/** Pour le mode dev : le ou les fichiers que lit la couche courante (« G cepes » ou « 4 T »). */
+function readPlanText(key) {
+  const { grouped, single } = Groups.plan(layerSpecies(key).map((s) => s.id), groups.values());
+  const parts = grouped.map(({ group, picks }) => `G ${group.group} (${nCanaux(picks.length)})`);
+  const withT = single.filter((sid) => species.get(sid)?.pm).length;
+  if (withT) parts.push(`${withT} T`);
+  return parts.join(" + ") || "rien";
 }
 
 /** Valeur affichée par pixel : T (max du groupe) ou S = T × M_eff × Φ (max du groupe, règle 9).
@@ -458,6 +526,7 @@ map.on("load", () => {
 $("basemap").addEventListener("change", (e) => setBasemap(e.target.value));
 $("layer").addEventListener("change", (e) => {
   setLayer(e.target.value);
+  noteReadPlan();
   deptIndex.byDept.clear();
   deptIndex.key = null;
   fetchWeather();
@@ -632,7 +701,38 @@ async function fetchDeptIndex() {
 
 // ---------------------------------------------------------------- chargement des PMTiles
 
-async function addSource(src, label) {
+const speciesMeta = (id) => fetch(`../species/${id}.json`).then((r) => (r.ok ? r.json() : null));
+
+/** Entrée de `species` pour un identifiant, créée depuis son fichier d'espèce si elle n'existe
+ *  pas encore (une espèce peut n'être connue que par son G). */
+async function ensureSpecies(id, bounds) {
+  let s = species.get(id);
+  if (!s) {
+    const meta = await speciesMeta(id);
+    s = { id, pm: null, label: null, names: meta?.names ?? { fr: id, la: "" }, group: meta?.group ?? null, bounds };
+    species.set(id, s);
+  }
+  return s;
+}
+
+/** Ordre des canaux d'un G glissé-déposé, dont le manifeste n'a pas donné `species` : les espèces
+ *  du groupe triées par identifiant, comme le pipeline, d'après le catalogue de l'API (`GET
+ *  /species`, les mêmes fichiers que `species/`) ou, sans API, les T déjà chargés. */
+async function dropChannelOrder(group, part) {
+  let metas = [...species.values()].map((s) => ({ id: s.id, group: s.group }));
+  try {
+    const r = await fetch(`${$("api").value.replace(/\/$/, "")}/species`);
+    if (r.ok) metas = Object.values((await r.json()).species);
+  } catch {
+    // pas d'API : on s'en tient aux espèces déjà là
+  }
+  const ids = Groups.channelOrder(group, metas, part, Groups.channelCount(palette.group_tile_encoding));
+  if (ids.length === 0) throw new Error(`espèces du groupe ${group} inconnues (API absente ?) : glisser d'abord ses T`);
+  return ids;
+}
+
+/** `info` (manifeste) : { kind: "G", group, species, part? } ; sans `info`, tout vient du nom. */
+async function addSource(src, label, info = null) {
   if (/(?:^|\/)A-\d+m-/.test(label)) {
     const pm = new pmtiles.PMTiles(src);
     await pm.getHeader(); // échoue tout de suite (CORS, 403…) plutôt qu'au premier rendu
@@ -640,19 +740,27 @@ async function addSource(src, label) {
     ++tileVersion;
     return "A";
   }
+  const g = info?.kind === "G" ? { group: info.group, part: info.part ?? 1 } : Groups.parseName(label);
+  if (g) {
+    const pm = new pmtiles.PMTiles(src);
+    const header = await pm.getHeader(); // CORS, 403… : tout de suite, comme pour T et A
+    const ids = info?.species ?? (await dropChannelOrder(g.group, g.part));
+    const bounds = [header.minLon, header.minLat, header.maxLon, header.maxLat];
+    const id = g.part > 1 ? `${g.group}-${g.part}` : g.group;
+    groups.set(id, { id, group: g.group, pm, label, species: ids, bounds });
+    for (const sid of ids) await ensureSpecies(sid, bounds);
+    ++tileVersion;
+    return `G:${id}`;
+  }
   const id = label.match(/(?:^|\/)T-([a-z_]+)-/)?.[1];
-  if (!id) throw new Error(`Nom inattendu (T-<espèce>-… ou A-…pmtiles) : ${label}`);
+  if (!id) throw new Error(`Nom inattendu (T-<espèce>-…, G-<groupe>-… ou A-…pmtiles) : ${label}`);
   const pm = new pmtiles.PMTiles(src);
   const header = await pm.getHeader();
-  const meta = await fetch(`../species/${id}.json`).then((r) => (r.ok ? r.json() : null));
-  species.set(id, {
-    id,
-    pm,
-    label, // clé du cache de tuiles : le nom du fichier porte le hash de l'espèce et du jeu
-    names: meta?.names ?? { fr: id, la: "" },
-    group: meta?.group ?? null,
-    bounds: [header.minLon, header.minLat, header.maxLon, header.maxLat],
-  });
+  const bounds = [header.minLon, header.minLat, header.maxLon, header.maxLat];
+  const s = await ensureSpecies(id, bounds);
+  s.pm = pm;
+  s.label = label; // clé du cache de tuiles : le nom du fichier porte le hash de l'espèce et du jeu
+  s.bounds = bounds;
   return id;
 }
 
@@ -660,9 +768,9 @@ async function addMany(items) {
   const first = species.size === 0;
   const errors = [];
   let loaded = 0;
-  for (const { src, label } of items) {
+  for (const { src, label, info } of items) {
     try {
-      await addSource(src, label);
+      await addSource(src, label, info);
       ++loaded;
     } catch (e) {
       errors.push(`${label} : ${e.message}`);
@@ -680,6 +788,9 @@ async function addMany(items) {
   }
   $("status").textContent = [
     `${species.size} espèce(s) : ${[...species.values()].map((s) => s.names.fr).join(", ")}`,
+    groups.size > 0
+      ? `Fichiers G : ${[...groups.values()].map((g) => `${g.id} (${nCanaux(g.species.length)})`).join(", ")} — lus à la place des T de leurs espèces`
+      : "Sans fichier G : une lecture T par espèce",
     altLayer
       ? "Classes d'altitude : couche A chargée (gel et phénologie par pixel)"
       : "Sans couche A : classe d'altitude = altitude médiane de la cellule météo",
@@ -688,7 +799,8 @@ async function addMany(items) {
   if (!DEV && species.size === 0) {
     $("weather-status").textContent = "Aucune carte publiée pour le moment.";
   }
-  if (currentKey) setLayer(currentKey); // une couche A ajoutée après coup change le rendu S
+  if (currentKey) setLayer(currentKey); // une couche A ou un G ajouté après coup change la lecture
+  noteReadPlan();
   fetchWeather();
   fetchDeptIndex(); // le bandeau des jours, à tout zoom
   return loaded;
@@ -718,6 +830,14 @@ function loadFromQuery() {
   return addMany(q.split(",").map((u) => ({ src: u, label: u })));
 }
 
+/** Ligne du mode dev sous la couche : ce que la couche courante lit (« G cepes (4 canaux) + A »). */
+function noteReadPlan() {
+  if (!DEV || !currentKey) return;
+  const line = `Lecture : ${readPlanText(currentKey)}${altLayer ? " + A" : ""}`;
+  const st = $("status");
+  st.textContent = /^Lecture : /m.test(st.textContent) ? st.textContent.replace(/^Lecture : .*$/m, line) : `${st.textContent}\n${line}`;
+}
+
 /** PMTiles publiés dans le bucket : `GET /tiles` renvoie une URL par fichier (présignée, ou
  *  relais /tiles/<nom> en mode proxy). Sans bucket configuré, on garde le glisser-déposer. */
 async function loadFromApi() {
@@ -734,22 +854,29 @@ async function loadFromApi() {
   // Plusieurs jeux de départements peuvent coexister dans le bucket (Doubs seul, France…) ; une
   // espèce n'a qu'une couche à la fois : on garde le jeu qui couvre le plus de départements.
   const dh = pickDeptsHash(body);
-  // Seuls les T (une espèce) et le A sont lus ici ; les G (un fichier par groupe, 4 nov. 2026) et
-  // tout kind inconnu sont ignorés sans compter comme une erreur de chargement.
-  const tiles = body.tiles.filter((t) => t.depts_hash === dh && (t.kind === "T" || t.kind === "A"));
-  const items = tiles.map((t) => ({
-    src: /^https?:/.test(t.url) ? t.url : `${base}${t.url}`,
-    label: t.name,
-  }));
+  // T (une espèce), G (un groupe, ses espèces dans l'ordre des canaux : `species` du manifeste,
+  // jamais deviné) et A du même jeu ; tout kind inconnu est ignoré sans compter comme une erreur.
+  // Les T restent chargés même avec les G : repli et espèces hors groupe.
+  const tiles = body.tiles.filter((t) => t.depts_hash === dh && ["T", "G", "A"].includes(t.kind));
+  const items = tiles
+    .filter((t) => t.kind !== "G" || (Array.isArray(t.species) && t.species.length > 0))
+    .map((t) => ({
+      src: /^https?:/.test(t.url) ? t.url : `${base}${t.url}`,
+      label: t.name,
+      info: t.kind === "G" ? { kind: "G", group: t.group, species: t.species, part: t.part } : null,
+    }));
   const loaded = await addMany(items);
   const hint =
     loaded < items.length && body.mode === "presign"
       ? " — si le navigateur bloque les URL présignées (CORS), passer l'API en CHAMPIS_TILES_MODE=proxy"
       : "";
+  const count = (k) => tiles.filter((t) => t.kind === k).length;
   const nDepts = body.depts_by_hash?.[dh]?.length;
   const jeu = nDepts ? `jeu d${dh} (${nDepts} département${nDepts > 1 ? "s" : ""})` : `jeu d${dh}`;
+  const kinds = [`${count("T")} T`, `${count("G")} G`, count("A") ? "A" : "sans A"].join(", ");
   $("status").textContent +=
-    `\n${loaded}/${items.length} fichier(s) chargés depuis le bucket (${body.mode}), ${jeu}`;
+    `\n${loaded}/${items.length} fichier(s) chargés depuis le bucket (${body.mode}), ${jeu} : ${kinds}${hint}`;
+  noteReadPlan();
 }
 
 /** Hash de départements à afficher : le plus de départements d'après le manifeste, sinon le plus

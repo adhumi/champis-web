@@ -2,7 +2,8 @@
 
 Le décodeur est exécuté par node (présent sur les runners CI ; test sauté sinon). Les PNG de
 référence sont ceux du pipeline (`tiles._png`) et des PNG encodés ici avec chacun des cinq
-filtres de ligne, pour gris, gris + alpha, RGB et RGBA.
+filtres de ligne, pour gris, gris + alpha, RGB et RGBA, plus les PNG RGBA des G (`tiles._png_rgba`),
+où l'alpha est un canal de données.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from champis_pipeline.tiles import NODATA, _png
+from champis_pipeline.tiles import NODATA, _png, _png_rgba
 
 HERE = Path(__file__).parent
 DRIVER = HERE / "decode_driver.js"
@@ -96,6 +97,22 @@ def test_pipeline_tiles_decode_exactly():
         data = np.frombuffer(base64.b64decode(r["data"]), np.uint8).reshape(256, 256, 2)
         np.testing.assert_array_equal(data[..., 0], a)
         np.testing.assert_array_equal(data[..., 1], np.where(a == NODATA, 0, 255))
+
+
+def test_group_tiles_decode_exactly():
+    """Les PNG RGBA des G (PIL, un canal tout à 255 = espèce sans tuile) reviennent octet pour
+    octet, l'alpha compris : 255 n'est pas une transparence mais le nodata de son canal."""
+    rng = np.random.default_rng(2)
+    arr = rng.integers(0, 255, size=(256, 256, 4), dtype=np.uint8)
+    arr[..., 3] = NODATA
+    arr[::9, ::4, 1] = NODATA
+    flat = np.full((256, 256, 4), 200, np.uint8)  # aplat : filtres et compression différents
+    out = decode_with_js([_png_rgba(arr), _png_rgba(flat)])
+    for a, r in zip([arr, flat], out, strict=True):
+        assert "error" not in r, r
+        assert (r["width"], r["height"], r["channels"]) == (256, 256, 4)
+        data = np.frombuffer(base64.b64decode(r["data"]), np.uint8).reshape(256, 256, 4)
+        np.testing.assert_array_equal(data, a)
 
 
 @pytest.mark.parametrize("channels", [1, 2, 3, 4])
