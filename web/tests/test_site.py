@@ -118,7 +118,7 @@ def test_shared_texts_render_without_error():
 
 
 def test_api_base_and_dev_flag():
-    page = {"hostname": "champis.adhumi.fr", "port": "", "origin": "https://champis.adhumi.fr"}
+    page = {"hostname": "champis.app", "port": "", "origin": "https://champis.app"}
     local = {"hostname": "localhost", "port": "3000", "origin": "http://localhost:3000"}
     same, override, other_port, dev, nodev = call(
         ("apiBase", [{**page, "search": ""}]),
@@ -127,7 +127,7 @@ def test_api_base_and_dev_flag():
         ("isDev", ["?dev=1&x=2"]),
         ("isDev", ["?x=2"]),
     )
-    assert same == "https://champis.adhumi.fr"
+    assert same == "https://champis.app"
     assert override == "https://x.test"
     assert other_port == "http://localhost:3000"  # l'API sert la page, quel que soit le port
     assert (dev, nodev) == (True, False)

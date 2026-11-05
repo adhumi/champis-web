@@ -1,4 +1,4 @@
-# web — le site champis.adhumi.fr
+# web — le site champis.app
 
 Quatre pages statiques, sans build (MapLibre GL et PMTiles par CDN), servies par champis-api sous `/web/` (`CHAMPIS_SERVE_WEB=1`, le défaut) avec `/shared/` et `/species/` à côté : la page lit `shared/palette.json`, `shared/texts/` et `species/<id>.json` aux mêmes chemins qu'en local. Refonte UX, lot 5 (1er nov. 2026) : même structure et même vocabulaire que l'app, sans l'identité Apple.
 
