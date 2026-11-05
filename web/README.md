@@ -4,9 +4,9 @@ Quatre pages statiques, sans build (MapLibre GL et PMTiles par CDN), servies par
 
 | Page | Rôle |
 | --- | --- |
-| `index.html` (Aujourd'hui) | Une phrase de saison (`Site.seasonSentence`) calculée depuis l'indice du jour de `GET /departements` pour le groupe choisi (Cèpes par défaut), le bandeau des onze jours (pastille = meilleure classe atteinte en France ce jour-là), la légende, les liens (carte, Comprendre, app). Plus de carte des départements ni de MapLibre sur cette page (spec › Points ouverts › Vue France et indice par département, 4 nov. 2026). |
+| `index.html` (Aujourd'hui) | Une phrase de saison (`Site.seasonSentence`) calculée depuis l'indice du jour de `GET /departements` pour le groupe choisi (Cèpes par défaut), le bandeau des onze jours (pastille = meilleure classe atteinte en France ce jour-là), la légende, les liens (carte, Guide, app). Plus de carte des départements ni de MapLibre sur cette page (spec › Points ouverts › Vue France et indice par département, 4 nov. 2026). |
 | `carte.html` (Carte) | La carte à la parcelle de la phase 1, alignée sur l'app : panneau fixe à droite (360 px) sur ordinateur, plein écran sur téléphone (panneau replié en haut, bandeau en bas, fiche en panneau coulissant). Opacité fixe, fond de carte dans le panneau, fiche en clair avec « Détails ». |
-| `comprendre.html` (Comprendre) | Les articles de `shared/texts/` (Markdown rendu par `Site.renderMarkdown`) et les fiches d'espèces du bloc `about` de `GET /species` (`?article=especes&espece=<id>`), en colonne de lecture de 680 px. |
+| `comprendre.html` (Guide) | Les articles de `shared/texts/` (Markdown rendu par `Site.renderMarkdown`) et les fiches d'espèces du bloc `about` de `GET /species` (`?article=especes&espece=<id>`), en colonne de lecture de 680 px. |
 | `soutenir.html` | Page de dons sobre. Le lien de paiement est `Site.SUPPORT_URL` dans `site.js` (`null` tant qu'Adrien ne l'a pas renseigné : la page explique en attendant). |
 
 Navigation : en-tête sur ordinateur, barre à trois entrées en bas sur téléphone (`Site.renderNav`). `noindex` sur toutes les pages. Sous la carte et les fiches, la ligne « Pour garder vos coins et être prévenu quand c'est bon : l'app Champis sur iPhone ».
@@ -45,7 +45,7 @@ Les deux réponses sont fusionnées par `field.js` dans la même structure de ce
 
 - `site.js` : fonctions pures partagées (dates en français sans locale, classes de la palette, phrase de saison, Markdown, adresse de l'API) exportées pour node, plus la navigation, la légende et le bandeau des jours côté navigateur. Testé par `web/tests/test_site.py`.
 - `app.js` : la carte (couche par espèce ou max du groupe, colorisation côté client, météo, bandeau des jours, fiche en clair). `field.js` : fonctions pures de la météo de la carte (source selon le zoom, fusion bbox/field, index spatial, classe d'altitude et facteur d'un pixel), exportées pour node et testées par `web/tests/test_field.py`. `groups.js` : fonctions pures des PMTiles par groupe (séparation des canaux d'un G en T par espèce, plan de lecture d'une couche, ordre des canaux d'un G glissé-déposé), testées par `web/tests/test_groups.py`. `png.js` décode les PNG de données octet par octet, jamais par canvas (Safari trame les gris) ; testé par `web/tests/test_png_decoder.py`.
-- `today.js`, `comprendre.js` : l'accueil et Comprendre.
+- `today.js`, `comprendre.js` : l'accueil et le Guide.
 - Position de la carte dans l'URL (`#zoom/lat/lon`) pour partager une vue.
 
 ## Rendu des tuiles (étude du 4 nov. 2026)

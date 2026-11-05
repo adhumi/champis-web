@@ -133,9 +133,8 @@
 
   // ------------------------------------------------------------ navigateur seulement
   const PAGES = [
-    { href: "index.html", title: "Aujourd'hui", icon: "M4 6h16M4 12h16M4 18h10" },
     { href: "carte.html", title: "Carte", icon: "M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2zm0 0v14m6-12v14" },
-    { href: "comprendre.html", title: "Comprendre", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm4 4h8M8 13h8" },
+    { href: "comprendre.html", title: "Guide", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm4 4h8M8 13h8" },
   ];
   function renderNav(active) {
     if (typeof document === "undefined") return;
