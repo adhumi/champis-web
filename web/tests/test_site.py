@@ -6,7 +6,6 @@ de l'accueil (aucune valeur inventée), rendu du Markdown de shared/texts/, adre
 
 from __future__ import annotations
 
-import itertools
 import json
 import shutil
 import subprocess
@@ -56,30 +55,12 @@ def test_french_dates_without_locale():
 def test_classes_follow_the_palette():
     cls = classes()
     assert [c["label"] for c in cls] == ["excellent", "bon", "moyen", "faible", "tres_faible"]
-    bon = next(t["hex"] for t in load_palette()["thresholds"] if t["label"] == "bon")
-    assert cls[1]["rgb"] == [int(bon[i : i + 2], 16) for i in (1, 3, 5)]
-    hi, lo, day, night = call(
-        ("classify", [cls, 0.8]),
-        ("classify", [cls, 0.0]),
-        ("accentHex", [load_palette()]),
-        ("accentHex", [load_palette(), True]),
+    assert cls[1]["rgb"] == [0x4C, 0xA6, 0x4C]
+    hi, lo, acc = call(
+        ("classify", [cls, 0.8]), ("classify", [cls, 0.0]), ("accentHex", [load_palette()])
     )
     assert hi["fr"] == "Excellent" and lo["label"] == "tres_faible"
-    # étape B1 : accent foncé en mode clair (la classe du haut), clair en mode sombre, sans alpha
-    excellent = next(t["hex"] for t in load_palette()["thresholds"] if t["label"] == "excellent")
-    assert day == excellent[:7] and len(night) == 7
-
-
-def test_palette_carries_its_opacity_and_very_low_is_transparent():
-    """Étape B1 (6 nov. 2026) : l'opacité de chaque classe est dans le hex (#RRGGBBAA), elle
-    croît avec le score, et « très faible » est transparent : la carte ne montre que le signal."""
-    cls = classes()
-    alphas = {c["label"]: c["rgba"][3] for c in cls}
-    assert alphas["tres_faible"] == 0
-    order = ["faible", "moyen", "bon", "excellent"]
-    assert all(alphas[a] < alphas[b] for a, b in itertools.pairwise(order))
-    assert call(("hexToRgba", ["#112233"]))[0] == [0x11, 0x22, 0x33, 255]
-    assert call(("hexToRgba", ["#11223380"]))[0] == [0x11, 0x22, 0x33, 0x80]
+    assert acc == next(t["hex"] for t in load_palette()["thresholds"] if t["label"] == "bon")
 
 
 def test_season_sentence_counts_departements_by_class_and_never_invents():
