@@ -67,17 +67,16 @@ footer.site-footer a { color: var(--muted); }
 .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; }
 .legend .nodata i { border: 1px solid var(--border); }
 
-/* Bandeau des onze jours */
-.days { display: grid; grid-template-columns: repeat(11, 1fr); gap: 2px; }
-.days button {
-  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0; border: 0;
-  background: transparent; color: var(--muted); font-size: .75rem; cursor: pointer; border-radius: 8px;
+/* Onze pastilles datées de la fiche d'un point (lecture seule, étape A) */
+.days { display: grid; grid-template-columns: repeat(11, 1fr); gap: 2px; margin: 6px 0 8px; }
+.days .day {
+  display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 4px 0;
+  color: var(--muted); font-size: .7rem; line-height: 1.2; border-radius: 8px;
 }
-.days button i { display: block; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--border); }
-.days button[aria-checked="true"] { color: var(--fg); font-weight: 700; background: var(--bg); }
-.days button[aria-checked="true"] i { border-color: var(--fg); }
-.days button.today { color: var(--fg); }
-.day-label { font-size: .875rem; color: var(--muted); }
+.days .day i { display: block; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--border); margin-bottom: 3px; }
+.days .day.past { opacity: .6; }
+.days .day.today { color: var(--fg); font-weight: 700; background: var(--bg); }
+.days .day.today i { border-color: var(--fg); }
 
 /* Colonne de lecture */
 .reading { max-width: 680px; margin: 0 auto; padding: 24px 20px 40px; }

@@ -131,3 +131,33 @@ def test_api_base_and_dev_flag():
     assert override == "https://x.test"
     assert other_port == "http://localhost:3000"  # l'API sert la page, quel que soit le port
     assert (dev, nodev) == (True, False)
+
+
+def test_short_date_and_today_line_in_paris_time():
+    """Étape A (6 nov. 2026) : « sam. 7 » sous une pastille, et la ligne sous la carte qui dit
+    l'heure de calcul de la météo en heure de Paris, quel que soit le fuseau du navigateur."""
+    short, same_day, day_before, line, line_bare, bad = call(
+        ("shortDate", ["2026-11-07"]),
+        ("computedPhrase", ["2026-11-06T02:17:55+00:00", "2026-11-06"]),
+        ("computedPhrase", ["2026-11-05T15:05:00+00:00", "2026-11-06"]),
+        ("todayLine", ["2026-11-06", "2026-11-06T02:17:55+00:00"]),
+        ("todayLine", ["2026-11-06", None]),
+        ("computedPhrase", ["pas une date", "2026-11-06"]),
+    )
+    assert short == "sam. 7"
+    assert same_day == "météo calculée à 3 h"  # 2 h UTC = 3 h à Paris en novembre
+    assert day_before == "météo calculée le jeu. 5 nov. à 16 h"
+    assert line == "Aujourd'hui, ven. 6 nov. · météo calculée à 3 h"
+    assert line_bare == "Aujourd'hui, ven. 6 nov."
+    assert bad is None
+    # heure d'été : 2 h UTC = 4 h à Paris
+    assert (
+        call(("computedPhrase", ["2026-07-01T02:00:00+00:00", "2026-07-01"]))[0]
+        == "météo calculée à 4 h"
+    )
+
+
+def test_app_line_stays_hidden_until_the_apps_are_published():
+    assert call(("esc", [""]))[0] == ""
+    driver = (HERE.parent / "site.js").read_text(encoding="utf-8")
+    assert "const APP_LINE = null;" in driver

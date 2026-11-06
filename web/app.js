@@ -6,7 +6,7 @@
  * d'altitude ; /weather/field en dessous : M_eff × Φ du jour courant sur toute l'emprise, spec ›
  * Points ouverts › Carte visible dès l'ouverture, 4 nov. 2026). Aucune valeur de modèle ici :
  * palette, seuils, encodage des tuiles et noms d'espèces sont lus depuis le dépôt, M et Φ depuis
- * l'API (servir la racine du dépôt, voir README). Dates, légende, bandeau et navigation viennent
+ * l'API (servir la racine du dépôt, voir README). Dates, légende, pastilles et navigation viennent
  * de site.js (lot 5), la fusion des réponses météo, l'index spatial des cellules et le facteur
  * d'un pixel de field.js, la séparation des canaux d'un G et le plan de lecture d'une couche de
  * groups.js ; le glisser-déposer et l'adresse de l'API sont des outils de développement
@@ -64,18 +64,12 @@ const transparentTile = makeTransparentTile();
 // covered : dernière emprise entièrement reçue de /weather/bbox (avec sa marge), sa couche, son heure
 // fieldCovered : jour → même chose pour /weather/field, pour que revenir sur un jour déjà vu ne
 // redemande rien (spec › Points ouverts › Carte visible dès l'ouverture, 4 nov. 2026)
-const weather = { today: null, cells: new Map(), index: null, error: null, covered: null, fieldCovered: new Map() };
-// Indice par département (/departements) pour la couche courante : il ne colore que le bandeau des
-// jours (pastille = indice du département sous le centre de la carte). La vue France, où il
-// colorait les départements sous le zoom 9, est retirée (spec › Points ouverts › Vue France et
-// indice par département, 4 nov. 2026) : la couche de tuiles reste visible à tout zoom ≥ MIN_ZOOM.
-// byDept : code → { species: { sid: { date: {value, coverage} } }, groups: { gid: { date: {value, leading, coverage} } } }
-const deptIndex = { key: null, byDept: new Map(), error: null };
+const weather = { today: null, computedAt: null, cells: new Map(), index: null, error: null, covered: null, fieldCovered: new Map() };
+// Le bandeau des jours et l'indice par département (/departements) qui le colorait sont retirés de la
+// carte (spec › Produit › étape A, 6 nov. 2026) : la carte montre toujours aujourd'hui, les onze
+// jours d'un point sont dans sa fiche.
 // refonte UX, lot 2 : le potentiel toute saison est une option, le score du jour la règle
 const mode = () => ($("potential").checked ? "T" : "S"); // "T" ou "S"
-let selectedDay = 0; // J−3 → J+7, choisi dans le bandeau des jours
-const dayOffset = () => selectedDay;
-const DAY_RANGE = [-3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7];
 // La cellule météo est cherchée par bloc de pixels, pas par pixel (Field.blockPx : 16 px à partir
 // du zoom 9, moins en dessous), à moins de Field.MAX_CELL_KM (7,5 km), sinon le pixel est
 // transparent plutôt que de prendre la météo d'une cellule chargée pour une autre emprise.
@@ -96,7 +90,8 @@ const SHARED_VIEW = location.hash.length > 1;
 // ---------------------------------------------------------------- navigation et panneau
 
 Site.renderNav("carte.html");
-$("app-line").textContent = Site.APP_LINE;
+if (Site.APP_LINE) $("app-line").textContent = Site.APP_LINE;
+else $("app-line").remove();
 $("dev").hidden = !DEV;
 
 // Sur téléphone le panneau se replie sur une ligne (couche courante + bouton) ; sur ordinateur il
@@ -344,8 +339,9 @@ function weatherFactor(sid, lat, lon, k) {
   return cell ? Field.factor(cell, sid, currentDate(), Field.altCenter(cell, k, palette.alt_encoding)) : null;
 }
 
+/** Le jour de la carte : toujours aujourd'hui (`today` de l'API), null avant la première réponse. */
 function currentDate() {
-  return Site.dateFor(weather.today, dayOffset());
+  return weather.today ?? null;
 }
 
 /** Classes → pixels colorés sur un canevas (synchrone) ; l'encodage PNG est à part (asynchrone). */
@@ -431,61 +427,12 @@ function setBasemap(name) {
   if (map.getLayer("basemap")) map.removeLayer("basemap");
   if (map.getSource("basemap")) map.removeSource("basemap");
   map.addSource("basemap", { type: "raster", tileSize: TILE, ...BASEMAPS[name] });
-  const above = ["depts-fill", "T"].find((id) => map.getLayer(id));
+  const above = map.getLayer("T") ? "T" : undefined;
   map.addLayer({ id: "basemap", type: "raster", source: "basemap" }, above);
 }
 
-/** Limites des départements (contours IGN Admin Express simplifiés, Licence ouverte) : une couche
- *  invisible, chargée une fois, qui ne sert qu'à trouver le département sous le centre de la carte
- *  pour le bandeau des jours (aucun appel réseau par déplacement). */
-function addDeptSource() {
-  map.addSource("depts", { type: "geojson", data: "departements.geojson", promoteId: "code" });
-  map.addLayer({
-    id: "depts-fill",
-    type: "fill",
-    source: "depts",
-    paint: { "fill-color": "rgba(0,0,0,0)", "fill-opacity": 0 },
-  });
-}
-
-function deptSeries(code) {
-  const d = deptIndex.byDept.get(code);
-  if (!d || !currentKey) return null;
-  const [kind, name] = currentKey.split(":");
-  return (kind === "g" ? d.groups[name] : d.species[name]) ?? null;
-}
-
-/** Département sous le centre de la carte, par les polygones déjà rendus (couche invisible). */
-function centerDept() {
-  if (!map.getLayer("depts-fill")) return null;
-  const f = map.queryRenderedFeatures(map.project(map.getCenter()), { layers: ["depts-fill"] })[0];
-  return f?.properties?.code ?? null;
-}
-
-/** Jour ISO pour un décalage J+k. */
-const dateFor = (k) => Site.dateFor(weather.today, k);
-
-/** Bandeau des onze jours (lot 2, rendu par site.js au lot 5) : une pastille par jour, colorée par
- *  l'indice du département sous le centre de la carte (GET /departements). */
-function buildDays() {
-  paintDays();
-}
-
-function paintDays() {
-  const code = deptIndex.byDept.size > 0 && deptIndex.key === currentKey ? centerDept() : null;
-  Site.renderDays($("days"), {
-    today: weather.today,
-    selected: selectedDay,
-    classes: classes ?? [],
-    valueFor: (iso) => (code ? deptSeries(code)?.[iso]?.value ?? null : null),
-    onSelect: (k) => {
-      selectedDay = k;
-      updateDayLabel(); // redessine aussi le bandeau
-      // sous FIELD_ZOOM, le jour peut demander un champ ; au-dessus, bbox a déjà les onze jours
-      if (mode() === "S") fetchWeather();
-      else setLayer(currentKey);
-    },
-  });
+/** Couche affichée, dans la ligne repliée du panneau sur téléphone. */
+function updateMobileLayer() {
   const layer = $("layer");
   $("mobile-layer").textContent = layer.disabled ? "Carte" : layer.options[layer.selectedIndex]?.text ?? "Carte";
 }
@@ -516,8 +463,6 @@ function setLayer(key) {
 
 map.on("load", () => {
   setBasemap($("basemap").value);
-  addDeptSource();
-  buildDays();
   loadPalette()
     .then(() => loadFromQuery() || loadFromApi())
     .catch((e) => ($("status").textContent = e.message));
@@ -526,16 +471,15 @@ map.on("load", () => {
 $("basemap").addEventListener("change", (e) => setBasemap(e.target.value));
 $("layer").addEventListener("change", (e) => {
   setLayer(e.target.value);
+  updateMobileLayer();
   noteReadPlan();
-  deptIndex.byDept.clear();
-  deptIndex.key = null;
   fetchWeather();
-  fetchDeptIndex(); // le bandeau des jours en a besoin à tout zoom
 });
 $("potential").addEventListener("change", () => {
   $("weather-status").hidden = mode() !== "S";
   $("potential-note").hidden = mode() !== "T";
   setLayer(currentKey);
+  updateTodayLine();
   fetchWeather();
 });
 // API : même origine (la page est servie par champis-api), ou `?api=` en dev statique (Site.apiBase).
@@ -544,29 +488,24 @@ $("api").addEventListener("change", fetchWeather);
 let moveTimer = null;
 map.on("moveend", () => {
   clearTimeout(moveTimer);
-  moveTimer = setTimeout(fetchWeather, 300); // redessine aussi le bandeau (département sous le centre)
+  moveTimer = setTimeout(fetchWeather, 300);
 });
-// Les limites arrivent souvent après l'indice : le bandeau se redessine une fois qu'elles sont là.
-let deptsReady = false;
-map.on("sourcedata", (e) => {
-  if (deptsReady || e.sourceId !== "depts" || !e.isSourceLoaded) return;
-  deptsReady = true;
-  paintDays();
-});
+
 
 // ---------------------------------------------------------------- météo (API)
 
-function updateDayLabel() {
-  const d = currentDate();
-  $("day-label").textContent = d ? (dayOffset() === 0 ? `Aujourd'hui, ${frenchDate(d)}` : frenchDate(d)) : "";
-  paintDays();
+/** Ligne sous la carte (étape A) : « Aujourd'hui, ven. 6 nov. · météo calculée à 4 h », ou le
+ *  rappel du potentiel toute saison, qui ne dépend d'aucun jour. */
+function updateTodayLine() {
+  $("today-line").textContent =
+    mode() === "T" ? "Potentiel toute saison, indépendant de la météo" : Site.todayLine(weather.today, weather.computedAt);
 }
 
 /** L'emprise demandée tient-elle dans une réponse complète déjà reçue pour la même couche, de
  *  moins de WEATHER_TTL_MS : la dernière de /weather/bbox (onze jours, à tout zoom), ou, sous
  *  FIELD_ZOOM, le champ du jour courant ? (même règle que `MapModel.weatherAlreadyCovers` dans
  *  l'app). Au-dessus du seuil, un champ ne dispense pas de bbox : il colore en attendant, mais
- *  les autres jours du bandeau viennent de bbox. */
+ *  les onze jours viennent de bbox. */
 function weatherCovers(box, useField) {
   const now = Date.now();
   return (
@@ -575,22 +514,13 @@ function weatherCovers(box, useField) {
   );
 }
 
-/** Heure de calcul du champ, pour le mode dev : « mer. 4 nov. à 15:15 » (heure locale). */
-function computedAtText(iso) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const p = (n) => String(n).padStart(2, "0");
-  return `${frenchDate(Field.localToday(d))} à ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
 /** Météo de l'emprise visible (plus WEATHER_PAD) pour la couche courante : /weather/bbox à
- *  partir de FIELD_ZOOM (onze jours), /weather/field en dessous (le seul jour du bandeau, sans
+ *  partir de FIELD_ZOOM (onze jours), /weather/field en dessous (le seul jour de la carte, sans
  *  plafond de cellules). Les deux sont fusionnées dans `weather.cells` par field.js, puis la
  *  couche est recolorisée depuis le cache de tuiles (setLayer). */
 let weatherAbort = null;
 let retryTimer = null;
 async function fetchWeather() {
-  paintDays();
   if (mode() !== "S" || !currentKey) return;
   const ids = layerSpecies(currentKey).map((s) => s.id);
   if (ids.length === 0) return;
@@ -601,8 +531,8 @@ async function fetchWeather() {
     setLayer(currentKey); // zoom avant, petit déplacement ou jour déjà reçu : les cellules sont déjà là
     return;
   }
-  // sous le seuil, le jour du bandeau ; avant la première réponse, `today` est inconnu : le jour
-  // civil local, et la réponse (`today`, `day`) remet le bandeau d'aplomb
+  // sous le seuil, le jour de la carte (aujourd'hui) ; avant la première réponse, `today` est
+  // inconnu : le jour civil local, et la réponse (`today`, `day`) le corrige
   const guessed = useField && !currentDate();
   const day = useField ? currentDate() ?? Field.localToday() : null;
   weatherAbort?.abort();
@@ -619,6 +549,7 @@ async function fetchWeather() {
     if (!r.ok) throw new Error(`${r.status} ${(await r.json()).detail ?? ""}`);
     const body = await r.json();
     weather.today = body.today;
+    weather.computedAt = body.computed_at ?? null;
     weather.error = null;
     const got = useField ? Field.mergeField(weather.cells, body) : Field.mergeBbox(weather.cells, body);
     weather.index = Field.buildIndex(weather.cells);
@@ -638,14 +569,14 @@ async function fetchWeather() {
         : "",
     ].filter(Boolean);
     const devLine = useField
-      ? `Météo à grande échelle : ${got.count} cellule(s), calculée le ${computedAtText(body.computed_at)}`
+      ? `Météo à grande échelle : ${got.count} cellule(s), ${Site.computedPhrase(body.computed_at, body.today) ?? "heure de calcul inconnue"}`
       : `Météo : ${got.count} cellule(s) dans l'emprise`;
     $("weather-status").textContent = DEV ? [devLine, ...notes].join(" — ") : notes.join(" ");
     if (!useField && got.missing && body.retry_after && body.retry_after <= 120) {
       clearTimeout(retryTimer);
       retryTimer = setTimeout(fetchWeather, body.retry_after * 1000 + 500);
     }
-    updateDayLabel();
+    updateTodayLine();
     if (guessed && body.day !== currentDate()) return fetchWeather(); // le jour deviné n'était pas J : une fois
     setLayer(currentKey);
   } catch (e) {
@@ -656,48 +587,7 @@ async function fetchWeather() {
   }
 }
 
-/** `GET /departements` pour la couche courante, pour le seul bandeau des jours : 11 jours d'un
- *  coup, le curseur de jour ne recharge rien, un déplacement non plus (le département sous le
- *  centre se lit dans les polygones déjà là). Les espèces demandées sont celles de la couche
- *  (espèce seule ou groupe). Sans indice, les pastilles restent vides : rien d'inventé. */
-let deptAbort = null;
-async function fetchDeptIndex() {
-  if (!currentKey) return;
-  const ids = layerSpecies(currentKey).map((s) => s.id);
-  if (ids.length === 0) return;
-  if (deptIndex.key === currentKey && deptIndex.byDept.size > 0) {
-    paintDays();
-    return;
-  }
-  deptAbort?.abort();
-  deptAbort = new AbortController();
-  const q = new URLSearchParams();
-  for (const id of ids) q.append("species", id);
-  try {
-    const r = await fetch(`${$("api").value.replace(/\/$/, "")}/departements?${q}`, {
-      signal: deptAbort.signal,
-    });
-    if (!r.ok) throw new Error(`${r.status} ${(await r.json()).detail ?? ""}`);
-    const body = await r.json();
-    deptIndex.key = currentKey;
-    deptIndex.error = null;
-    deptIndex.byDept.clear();
-    for (const [code, d] of Object.entries(body.departements)) {
-      const toMap = (rows) => Object.fromEntries(rows.map((row) => [row.date, row]));
-      deptIndex.byDept.set(code, {
-        species: Object.fromEntries(Object.entries(d.species).map(([sid, rows]) => [sid, toMap(rows)])),
-        groups: Object.fromEntries(Object.entries(d.groups).map(([gid, rows]) => [gid, toMap(rows)])),
-      });
-    }
-    if (!weather.today) weather.today = body.today; // le bandeau des jours a besoin de J
-    updateDayLabel(); // redessine aussi le bandeau
-  } catch (e) {
-    if (e.name === "AbortError") return;
-    deptIndex.error = e.message;
-    console.warn(`GET /departements : ${e.message}`);
-    if (DEV) $("status").textContent += `\nBandeau des jours sans indice (GET /departements : ${e.message})`;
-  }
-}
+
 
 // ---------------------------------------------------------------- chargement des PMTiles
 
@@ -802,7 +692,6 @@ async function addMany(items) {
   if (currentKey) setLayer(currentKey); // une couche A ou un G ajouté après coup change la lecture
   noteReadPlan();
   fetchWeather();
-  fetchDeptIndex(); // le bandeau des jours, à tout zoom
   return loaded;
 }
 
@@ -818,6 +707,7 @@ function refreshLayerList() {
     sel.add(new Option(s.names.fr, `s:${id}`));
   }
   sel.disabled = species.size === 0;
+  updateMobileLayer();
   if (species.size > 0 && (!currentKey || ![...sel.options].some((o) => o.value === currentKey))) {
     sel.value = sel.options[0].value;
     setLayer(sel.value);
@@ -925,8 +815,9 @@ function terrainPhrase(t) {
 
 const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-/** Fiche en clair (lot 2) : libellé et jour, espèce, phrases, puis les chiffres derrière Détails. */
-function renderProbe({ value, name, phrases, details }) {
+/** Fiche en clair (lot 2) : libellé et jour, espèce, phrases, les onze jours du point (étape A,
+ *  en lecture seule : la carte reste sur aujourd'hui), puis les chiffres derrière Détails. */
+function renderProbe({ value, name, phrases, details, days = null }) {
   const cls = classify(value);
   const when = currentDate() ? Site.whenWord(currentDate(), weather.today) : "";
   const sub = [name, currentDate() ? frenchDate(currentDate()) : ""].filter(Boolean).join(" · ");
@@ -934,23 +825,44 @@ function renderProbe({ value, name, phrases, details }) {
     `<h2><span class="dot" style="background:${cls.hex}"></span>${esc(cls.fr)} ${mode() === "S" ? esc(when) : "toute saison"}</h2>` +
     `<div class="sub">${esc(sub)}</div>` +
     (phrases.length ? `<ul>${phrases.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : "") +
+    (days ? `<div id="probe-days" aria-label="Les onze jours de ce point"></div>` : "") +
     `<details><summary>Détails</summary><div>${esc(details)}</div></details>` +
     `<button type="button" class="button quiet small" id="probe-close">Fermer</button>`;
   $("probe-close").addEventListener("click", () => (probe.style.display = "none"));
+  if (days) Site.renderDayDots($("probe-days"), { today: weather.today, days, classes });
 }
 
-/** Phrases météo et saison de `GET /weather` › `summary` pour une cellule, une espèce, un jour, une classe. */
-async function fetchSummary(cellId, sid, altKey) {
-  const q = new URLSearchParams({ cell: cellId, species: sid });
+/** `GET /weather?cell=` pour toutes les espèces du point en une requête : onze jours par espèce et
+ *  par classe d'altitude, avec les phrases (`summary`) et les facteurs. null si l'API refuse. */
+async function fetchPoint(cellId, sids) {
+  const q = new URLSearchParams({ cell: cellId });
+  for (const sid of sids) q.append("species", sid);
   const r = await fetch(`${$("api").value.replace(/\/$/, "")}/weather?${q}`);
-  if (!r.ok) return { summary: [], factors: null };
-  const body = await r.json();
-  const row = body.species?.[sid]?.find((d) => d.date === currentDate())?.by_alt?.[altKey];
-  return { summary: row?.summary ?? [], factors: row?.factors ?? null, triggerDays: row?.trigger_days ?? null };
+  return r.ok ? r.json() : null;
 }
+
+/** Les onze jours d'un point : pour chaque jour, max sur les espèces de T × M_eff × Φ à la classe
+ *  d'altitude du pixel (règle 9) ; null quand aucune espèce n'a de météo ce jour-là. */
+function pointDays(body, tBySid, altKey) {
+  const dates = new Set();
+  for (const sid of Object.keys(tBySid)) for (const row of body.species?.[sid] ?? []) dates.add(row.date);
+  return [...dates].sort().map((iso) => {
+    let value = null;
+    for (const [sid, T] of Object.entries(tBySid)) {
+      const cls = body.species?.[sid]?.find((d) => d.date === iso)?.by_alt?.[altKey];
+      if (!cls || cls.M_eff === undefined || cls.phi === undefined) continue;
+      const v = T * cls.M_eff * cls.phi;
+      if (value === null || v > value) value = v;
+    }
+    return { iso, value };
+  });
+}
+
+let probeToken = 0; // un clic plus récent rend caduque la réponse d'un clic précédent
 
 map.on("click", async (e) => {
   if (!currentKey) return;
+  const token = ++probeToken;
   const z = MAX_ZOOM;
   const n = TILE * 2 ** z;
   const lat = (e.lngLat.lat * Math.PI) / 180;
@@ -998,7 +910,12 @@ map.on("click", async (e) => {
   const altKey = String(Field.altCenter(cell, altIdx, palette.alt_encoding));
   const altTxt = altLayer && altIdx !== null && altIdx !== nodata ? "" : " (médiane cellule)";
   renderProbe({ value: best.v, name, phrases: [terrainPhrase(best.T), "météo : chargement…"], details: "…" });
-  const { summary, factors } = await fetchSummary(cell.id, best.sid, altKey);
+  const tBySid = Object.fromEntries(arrays.filter(({ t }) => !Number.isNaN(t[i])).map(({ sid, t }) => [sid, t[i]]));
+  const body = await fetchPoint(cell.id, Object.keys(tBySid)).catch(() => null);
+  if (token !== probeToken) return;
+  const row = body?.species?.[best.sid]?.find((d) => d.date === currentDate())?.by_alt?.[altKey];
+  const summary = row?.summary ?? [];
+  const factors = row?.factors ?? null;
   const factorsTxt = factors
     ? Object.entries(factors).filter(([k]) => k !== "M").map(([k, v]) => `${k} ${(+v).toFixed(2)}`).join(" · ")
     : "facteurs indisponibles";
@@ -1006,6 +923,7 @@ map.on("click", async (e) => {
     value: best.v,
     name,
     phrases: [terrainPhrase(best.T), ...summary],
+    days: body ? pointDays(body, tBySid, altKey) : null,
     details:
       `S = ${best.v.toFixed(3)} · T ${best.T.toFixed(2)} × M_eff·Φ ${w.toFixed(2)} · cellule ${cell.id}` +
       ` · classe ${altKey} m${altTxt}${cell.stale ? " · météo périmée" : ""}\n${factorsTxt}`,

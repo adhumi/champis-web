@@ -12,8 +12,10 @@
     main.carte { display: grid; grid-template-columns: minmax(0, 1fr) 360px; height: calc(100vh - 53px); }
     #map-col { position: relative; display: flex; flex-direction: column; min-width: 0; }
     #map { flex: 1; position: relative; }
-    /* bandeau des jours flottant sur la carte, largeur contenue et centré (comme sur mobile) */
-    #strip { position: absolute; z-index: 4; left: 50%; transform: translateX(-50%); bottom: 24px; width: min(560px, calc(100% - 32px)); box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); box-shadow: 0 2px 10px rgba(0, 0, 0, .18); }
+    /* la carte montre toujours aujourd'hui (étape A, 6 nov. 2026) : une ligne le dit, avec l'heure de
+       calcul de la météo, en bas à gauche, sur ordinateur comme sur téléphone */
+    #today-line { position: absolute; z-index: 4; left: 12px; bottom: 12px; max-width: calc(100% - 140px); padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--fg); font-size: .8rem; }
+    #today-line:empty { display: none; }
     #panel { border-left: 1px solid var(--border); background: var(--panel); padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
     #panel label.field { display: block; font-size: .8rem; color: var(--muted); margin-bottom: 2px; }
     #panel select { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); }
@@ -43,9 +45,12 @@
       #panel.collapsed > :not(#mobile-controls) { display: none; }
       #mobile-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
       #mobile-controls button { border: 0; background: transparent; color: var(--accent); font-weight: 600; padding: 4px 6px; cursor: pointer; }
-      #probe { position: absolute; z-index: 6; left: 8px; right: 8px; bottom: 8px; max-height: 55%; overflow: auto; background: var(--panel); }
-      #strip { left: 8px; right: 8px; bottom: 8px; width: auto; transform: none; box-shadow: none; }
-      #probe[style*="block"] ~ #strip { display: none; }
+      /* la fiche sort du panneau replié (qui la coupait, défaut relevé le 6 nov. 2026) : fixe, au-dessus
+         de la barre d'onglets */
+      #probe { position: fixed; z-index: 6; left: 8px; right: 8px; bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom)); max-height: 55vh; overflow: auto; background: var(--panel); box-shadow: 0 2px 12px rgba(0, 0, 0, .2); }
+      #today-line { left: 8px; bottom: 8px; }
+      /* commandes de zoom sous le panneau replié, plus dessous */
+      .maplibregl-ctrl-top-right { top: 64px; }
       #site-header { display: none; }
     }
   </style>
@@ -55,10 +60,7 @@
   <main class="carte">
     <div id="map-col">
       <div id="map" role="application" aria-label="Carte des champignons"></div>
-      <div id="strip">
-        <div class="day-label" id="day-label"></div>
-        <div id="days"></div>
-      </div>
+      <div id="today-line" aria-live="polite"></div>
     </div>
     <aside id="panel" aria-label="Commandes de la carte">
       <div id="mobile-controls">

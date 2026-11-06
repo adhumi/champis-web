@@ -1,6 +1,6 @@
-/* Code partagé du site (refonte UX, lot 5) : palette et classes, dates en français, phrase de
- * saison depuis GET /departements, rendu du Markdown de shared/texts/, bandeau des jours, légende,
- * navigation. Les fonctions pures sont exportées pour node (web/tests/test_site.py) ; rien ici
+/* Code partagé du site (refonte UX, lot 5 ; étape A du 6 nov. 2026) : palette et classes, dates
+ * en français, heure de calcul de la météo, phrase de saison, rendu du Markdown de shared/texts/,
+ * pastilles des onze jours de la fiche, légende, navigation. Les fonctions pures sont exportées pour node (web/tests/test_site.py) ; rien ici
  * ne connaît une espèce : noms, groupes, seuils et couleurs viennent de l'API et de la palette. */
 (function (root) {
   "use strict";
@@ -11,7 +11,9 @@
   const DAY_RANGE = [-3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7];
   /* Lien de don (RevenueCat Web Billing), à renseigner par Adrien ; null = la page explique en attendant. */
   const SUPPORT_URL = null;
-  const APP_LINE = "Pour garder vos coins et être prévenu quand c'est bon : l'app Champis sur iPhone.";
+  /* Ligne qui renvoie vers l'app, sous la carte et les fiches : null tant que l'app n'est pas publiée
+   * (étape A, 6 nov. 2026 : pas de promesse sans lien), le texte à remettre à la publication. */
+  const APP_LINE = null;
 
   // ------------------------------------------------------------ dates (UTC midi : jamais de décalage)
   const parse = (iso) => new Date(iso + "T12:00:00Z");
@@ -31,6 +33,39 @@
   }
   /** « aujourd'hui », ou le jour de la semaine. */
   const whenWord = (iso, today) => (iso === today ? "aujourd'hui" : weekdayName(iso));
+  /** `2026-11-07` → `sam. 7` : sous une pastille, jamais une initiale seule ni un J+n. */
+  function shortDate(iso) {
+    const d = parse(iso);
+    return `${SHORT_WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()}`;
+  }
+
+  // ------------------------------------------------------------ heure de calcul de la météo
+  /** Date (ISO) et heure à Paris d'un instant UTC : la pré-chauffe tourne en UTC, on la dit en
+   *  heure française quel que soit le fuseau du navigateur. */
+  function parisParts(instant) {
+    const d = new Date(instant);
+    if (Number.isNaN(d.getTime())) return null;
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23",
+      }).formatToParts(d).map((p) => [p.type, p.value])
+    );
+    return { iso: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) };
+  }
+  /** « météo calculée à 4 h » le jour même, « météo calculée le jeu. 5 nov. à 16 h » sinon ;
+   *  null si l'instant est illisible. */
+  function computedPhrase(instant, today) {
+    const p = parisParts(instant);
+    if (!p) return null;
+    return p.iso === today ? `météo calculée à ${p.hour} h` : `météo calculée le ${frenchDate(p.iso)} à ${p.hour} h`;
+  }
+  /** Ligne sous la carte : « Aujourd'hui, ven. 6 nov. · météo calculée à 4 h ». */
+  function todayLine(today, computedAt) {
+    if (!today) return "";
+    const head = `Aujourd'hui, ${frenchDate(today)}`;
+    const when = computedAt ? computedPhrase(computedAt, today) : null;
+    return when ? `${head} · ${when}` : head;
+  }
 
   // ------------------------------------------------------------ palette
   function hexToRgb(hex) {
@@ -132,9 +167,12 @@
   const isDev = (search) => new URLSearchParams(search).get("dev") === "1";
 
   // ------------------------------------------------------------ navigateur seulement
+  /* Barre du téléphone : trois entrées (étape A, 6 nov. 2026). Sur ordinateur, Soutenir reste à
+   * droite de l'en-tête, hors de la navigation. */
   const PAGES = [
     { href: "carte.html", title: "Carte", icon: "M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2zm0 0v14m6-12v14" },
     { href: "comprendre.html", title: "Guide", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm4 4h8M8 13h8" },
+    { href: "soutenir.html", title: "Soutenir", support: true, icon: "M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z" },
   ];
   function renderNav(active) {
     if (typeof document === "undefined") return;
@@ -142,7 +180,7 @@
     if (header) {
       header.innerHTML =
         `<a class="brand" href="carte.html"><img src="logo.svg" alt="" width="32" height="32" /> Champis</a>` +
-        `<nav aria-label="Pages">${PAGES.map((p) => `<a href="${p.href}"${p.href === active ? ' aria-current="page"' : ""}>${p.title}</a>`).join("")}</nav>` +
+        `<nav aria-label="Pages">${PAGES.filter((p) => !p.support).map((p) => `<a href="${p.href}"${p.href === active ? ' aria-current="page"' : ""}>${p.title}</a>`).join("")}</nav>` +
         `<span class="spacer"></span><a class="support" href="soutenir.html">Soutenir</a>`;
     }
     const tabs = document.getElementById("site-tabs");
@@ -178,35 +216,31 @@
       [...classes].reverse().map((c) => `<span><i style="background:${c.hex}"></i>${esc(c.fr)}</span>`).join("") +
       `<span class="nodata"><i></i>Transparent : hors forêt ou sans donnée</span>`;
   }
-  /** Bandeau des onze jours : `valueFor(iso)` donne l'indice (ou null) qui colore la pastille. */
-  function renderDays(el, { today, selected, classes, valueFor, onSelect }) {
+  /** Onze pastilles datées de la fiche d'un point, en lecture seule (étape A, 6 nov. 2026 : la
+   *  carte reste sur aujourd'hui, la fiche montre la semaine du point). `days` = [{ iso, value }],
+   *  value null = pas de météo ce jour-là (pastille vide, jamais une valeur inventée). */
+  function renderDayDots(el, { today, days, classes }) {
     el.classList.add("days");
-    el.setAttribute("role", "radiogroup");
-    el.innerHTML = "";
-    for (const k of DAY_RANGE) {
-      const iso = dateFor(today, k);
-      const v = iso && valueFor ? valueFor(iso) : null;
-      const b = document.createElement("button");
-      b.type = "button";
-      b.setAttribute("role", "radio");
-      b.setAttribute("aria-checked", String(k === selected));
-      b.classList.toggle("today", k === 0);
-      const label = iso ? frenchDate(iso) : `J${k >= 0 ? "+" : ""}${k}`;
-      const state = v === null || v === undefined ? "pas d'indice" : classify(classes, v).fr;
-      b.title = `${label} : ${state}`;
-      b.setAttribute("aria-label", b.title);
-      b.innerHTML = `<i style="background:${v === null || v === undefined ? "transparent" : classify(classes, v).hex}"></i><span>${iso ? shortWeekday(iso) : ""}</span>`;
-      b.addEventListener("click", () => onSelect(k));
-      el.appendChild(b);
-    }
+    el.setAttribute("role", "list");
+    el.innerHTML = days
+      .map(({ iso, value }) => {
+        const known = value !== null && value !== undefined;
+        const cls = known ? classify(classes, value) : null;
+        const label = `${iso === today ? "aujourd'hui, " : ""}${frenchDate(iso)} : ${known ? cls.fr : "pas de météo"}`;
+        return (
+          `<span role="listitem" class="day${iso === today ? " today" : ""}${iso < today ? " past" : ""}" title="${esc(label)}" aria-label="${esc(label)}">` +
+          `<i style="background:${known ? cls.hex : "transparent"}"></i><span>${SHORT_WEEKDAYS[parse(iso).getUTCDay()]}</span><span>${parse(iso).getUTCDate()}</span></span>`
+        );
+      })
+      .join("");
   }
 
   const Site = {
     WEEKDAYS, SHORT_WEEKDAYS, DAY_RANGE, SUPPORT_URL, APP_LINE,
-    weekdayName, shortWeekday, frenchDate, dateFor, whenWord,
+    weekdayName, shortWeekday, frenchDate, shortDate, dateFor, whenWord, parisParts, computedPhrase, todayLine,
     hexToRgb, sortedClasses, classify, accentHex, classCounts, seasonSentence,
     esc, inline, renderMarkdown, markdownTitle, apiBase, isDev,
-    renderNav, applyAccent, loadPalette, renderLegend, renderDays,
+    renderNav, applyAccent, loadPalette, renderLegend, renderDayDots,
   };
   root.Site = Site;
   if (typeof module !== "undefined" && module.exports) module.exports = Site;

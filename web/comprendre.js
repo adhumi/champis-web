@@ -68,7 +68,7 @@
     if (refs.length) {
       html += `<details><summary>Sources</summary><ul>${refs.map(([, v]) => `<li class="small">${Site.esc(v)}</li>`).join("")}</ul></details>`;
     }
-    return html + `<p class="app-line">${Site.esc(Site.APP_LINE)}</p>`;
+    return html + (Site.APP_LINE ? `<p class="app-line">${Site.esc(Site.APP_LINE)}</p>` : "");
   }
 
   (async () => {
@@ -87,7 +87,7 @@
       let html = `<h1>${Site.esc(article.title)}</h1>` + (md ? Site.renderMarkdown(md) : `<p class="muted">Texte indisponible.</p>`);
       if (article.species) {
         html += speciesList(await loadSpecies());
-        html += `<p class="app-line" id="app">${Site.esc(Site.APP_LINE)}</p>`;
+        if (Site.APP_LINE) html += `<p class="app-line" id="app">${Site.esc(Site.APP_LINE)}</p>`;
       }
       if (article.id === "comment-ca-marche") {
         html += `<p class="small muted">Champis est gratuit et financé par des dons : <a href="soutenir.html">soutenir le projet</a>.</p>`;

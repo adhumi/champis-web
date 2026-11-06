@@ -26,7 +26,7 @@ def test_every_id_used_by_app_js_exists_in_carte_html():
     html = (WEB / "carte.html").read_text(encoding="utf-8")
     js = (WEB / "app.js").read_text(encoding="utf-8")
     # identifiants créés dynamiquement par app.js ou site.js, hors du HTML statique
-    dynamic = {"probe-close"}
+    dynamic = {"probe-close", "probe-days"}
     assert ids_used_by(js) - ids_in(html) - dynamic == set()
 
 
@@ -39,10 +39,26 @@ def test_every_page_has_the_shared_chrome(page: str):
 def test_the_france_view_is_gone():
     """Décision du 4 nov. 2026 (spec › Points ouverts › Vue France et indice par département) :
     plus de départements colorés sur la carte ni sur l'accueil, la couche de tuiles reste visible
-    à tout zoom ; `GET /departements` ne sert plus qu'au bandeau des jours et à la phrase de saison."""
+    à tout zoom."""
     app = (WEB / "app.js").read_text(encoding="utf-8")
     for name in ("DEPT_ZOOM", "franceView", "paintDepts", "updateTileVisibility", "depts-line"):
         assert name not in app, name
     assert 'setLayoutProperty("T"' not in app
-    # le bandeau des jours garde l'indice par département, des deux côtés
-    assert "/departements?" in app and "centerDept" in app and "renderDays" in app
+
+
+def test_the_map_stays_on_today_and_the_probe_shows_the_week():
+    """Étape A (spec › Produit, 6 nov. 2026) : le bandeau des jours quitte la carte, qui montre
+    toujours aujourd'hui ; plus de lecture de `GET /departements` ni des limites départementales ;
+    les onze jours d'un point sont dans sa fiche, en lecture seule."""
+    app = (WEB / "app.js").read_text(encoding="utf-8")
+    html = (WEB / "carte.html").read_text(encoding="utf-8")
+    for name in (
+        "/departements?",
+        "departements.geojson",
+        "renderDays",
+        "selectedDay",
+        "centerDept",
+    ):
+        assert name not in app, name
+    assert 'id="strip"' not in html and 'id="today-line"' in html
+    assert "Site.renderDayDots" in app and "Site.todayLine" in app
