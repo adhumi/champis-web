@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -43,3 +44,34 @@ jobs:
 
       - name: Configuration Caddy valide
         run: docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+  # Railway ne récupère pas les sous-modules (build depuis un instantané sans .git) : la CI, qui a le
+  # référentiel, déploie elle-même avec `railway up` après des tests verts sur main, ou à la main
+  # (workflow_dispatch). RAILWAY_TOKEN : jeton de projet Railway (environnement production).
+  deploy:
+    needs: web
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-champis-web
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.CHAMPIS_REFERENTIEL_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Railway CLI
+        run: npm install -g @railway/cli
+
+      # sans remote GitHub, la CLI envoie l'arbre de travail, sous-module compris
+      - name: Déploiement (service champis-web)
+        run: |
+          git remote remove origin
+          railway up --ci --service champis-web
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
