@@ -18,7 +18,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from champis_pipeline.species import load_palette
+
+from referential import load_palette
 
 HERE = Path(__file__).parent
 DRIVER = HERE / "field_driver.js"

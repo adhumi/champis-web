@@ -1,0 +1,10 @@
+# Railway : service statique champis-web (Caddy, Dockerfile à la racine), domaine champis.app.
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 60
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 5

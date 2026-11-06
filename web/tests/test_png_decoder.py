@@ -18,7 +18,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from champis_pipeline.tiles import NODATA, _png, _png_rgba
+
+from pngtiles import NODATA
+from pngtiles import png as _png
+from pngtiles import png_rgba as _png_rgba
 
 HERE = Path(__file__).parent
 DRIVER = HERE / "decode_driver.js"

@@ -1,6 +1,6 @@
 # web — le site champis.app
 
-Quatre pages statiques, sans build (MapLibre GL et PMTiles copiés dans `web/vendor/`, plus aucun CDN tiers depuis l'étape C), servies par champis-api sous `/web/` (`CHAMPIS_SERVE_WEB=1`, le défaut) avec `/shared/` et `/species/` à côté : la page lit `shared/palette.json`, `shared/texts/` et `species/<id>.json` aux mêmes chemins qu'en local. Refonte UX, lot 5 (1er nov. 2026) : même structure et même vocabulaire que l'app, sans l'identité Apple.
+Quatre pages statiques, sans build (MapLibre GL et PMTiles copiés dans `web/vendor/`, plus aucun CDN tiers depuis l'étape C), servies par un service statique Railway (Caddy, `Caddyfile`) sur `champis.app` depuis le découpage des dépôts (6 nov. 2026), avec `/shared/` et `/species/` du référentiel (sous-module `champis/`) à côté : la page lit `shared/palette.json`, `shared/texts/` et `species/<id>.json` aux mêmes chemins qu'en local. L'API est sur `api.champis.app` (`Site.API_URL`). Refonte UX, lot 5 (1er nov. 2026) : même structure et même vocabulaire que l'app, sans l'identité Apple.
 
 | Page | Rôle |
 | --- | --- |
@@ -32,11 +32,11 @@ MapLibre GL 4.7.1 et PMTiles 3.2.1 sont servis par Champis depuis `web/vendor/` 
 ## Lancer
 
 ```bash
-make serve                           # champis-api sert /web/, /shared/, /species et l'API
-open http://localhost:8000/web/
+make setup                           # sous-module champis/ et environnement de test
+make serve                           # http://localhost:8080/web/ (liens shared et species vers champis/)
 ```
 
-Les pages appellent l'API à leur propre origine (`Site.apiBase`). En statique depuis la racine du dépôt (`python3 -m http.server 8080`), indiquer l'API : `?api=http://127.0.0.1:8000`.
+Les pages appellent l'API à `Site.apiBase` : `https://api.champis.app` en production ; en local, l'API de `make serve` dans champis-api sur le port 8000 ; `?api=…` l'emporte toujours.
 
 ## Mode développement : `?dev=1`
 

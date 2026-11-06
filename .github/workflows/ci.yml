@@ -1,0 +1,45 @@
+# CI du site : lint et tests (Python + node, sans réseau), configuration du serveur statique.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      # Le référentiel adhumi/champis est le sous-module champis/ ; tant qu'il est privé, le jeton
+      # par défaut ne le lit pas : CHAMPIS_REFERENTIEL_TOKEN (jeton à granularité fine, lecture du
+      # contenu de adhumi/champis). Une fois le dépôt public, le secret devient inutile.
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.CHAMPIS_REFERENTIEL_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv sync --group dev --locked
+
+      - name: Ruff (lint + format)
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Tests (fonctions pures en node, décodeur PNG, identifiants des pages)
+        run: uv run pytest
+
+      - name: Configuration Caddy valide
+        run: docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
