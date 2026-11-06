@@ -5,7 +5,7 @@ Quatre pages statiques, sans build (MapLibre GL et PMTiles par CDN), servies par
 | Page | Rôle |
 | --- | --- |
 | `index.html` | Redirige vers `carte.html` : le site s'ouvre sur la carte (il n'y a plus d'onglet Aujourd'hui, 5 nov. 2026). |
-| `carte.html` (Carte) | La carte à la parcelle de la phase 1, alignée sur l'app : panneau fixe à droite (360 px) sur ordinateur, plein écran sur téléphone (panneau replié en haut, fiche fixe au-dessus de la barre d'onglets). La carte montre toujours aujourd'hui : une ligne en bas à gauche le dit, avec l'heure de calcul de la météo en heure de Paris (étape A, 6 nov. 2026). Opacité fixe, fond de carte dans le panneau, fiche en clair avec ses onze jours et « Détails ». |
+| `carte.html` (Carte) | La carte à la parcelle de la phase 1, alignée sur l'app : panneau fixe à droite (360 px) sur ordinateur, plein écran sur téléphone (panneau replié en haut, fiche fixe au-dessus de la barre d'onglets). La carte montre toujours aujourd'hui : une ligne en bas à gauche le dit, avec l'heure de calcul de la météo en heure de Paris (étape A, 6 nov. 2026). Opacité de chaque classe lue dans la palette (`#RRGGBBAA`, « très faible » transparent, étape B1), fond de carte dans le panneau, fiche en clair avec ses onze jours et « Détails ». |
 | `comprendre.html` (Guide) | Les articles de `shared/texts/` (Markdown rendu par `Site.renderMarkdown`) et les fiches d'espèces du bloc `about` de `GET /species` (`?article=especes&espece=<id>`), en colonne de lecture de 680 px. |
 | `soutenir.html` | Page de dons sobre. Le lien de paiement est `Site.SUPPORT_URL` dans `site.js` (`null` tant qu'Adrien ne l'a pas renseigné : la page explique en attendant). |
 

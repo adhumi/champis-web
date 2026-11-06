@@ -68,21 +68,30 @@
   }
 
   // ------------------------------------------------------------ palette
-  function hexToRgb(hex) {
+  /** `#RRGGBB` ou `#RRGGBBAA` → [r, g, b, a] ; sans alpha, opaque (255). L'opacité d'une classe
+   *  vient de la palette (étape B1, 6 nov. 2026) : « très faible » y est transparent. */
+  function hexToRgba(hex) {
     const n = parseInt(hex.slice(1, 7), 16);
-    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    const a = hex.length >= 9 ? parseInt(hex.slice(7, 9), 16) : 255;
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255, a];
   }
-  /** Seuils triés décroissants, rgb pré-parsé. */
+  const hexToRgb = (hex) => hexToRgba(hex).slice(0, 3);
+  /** Seuils triés décroissants, rgb et rgba pré-parsés. */
   function sortedClasses(palette) {
-    return [...palette.thresholds].sort((a, b) => b.min - a.min).map((t) => ({ ...t, rgb: hexToRgb(t.hex) }));
+    return [...palette.thresholds]
+      .sort((a, b) => b.min - a.min)
+      .map((t) => ({ ...t, rgb: hexToRgb(t.hex), rgba: hexToRgba(t.hex) }));
   }
   function classify(classes, v) {
     return classes.find((c) => v >= c.min) ?? classes[classes.length - 1];
   }
-  /** Le vert « Bon » de la palette sert d'accent au site ; à défaut, la classe du milieu. */
-  function accentHex(palette) {
-    const t = palette.thresholds.find((x) => x.label === "bon") ?? palette.thresholds[Math.floor(palette.thresholds.length / 2)];
-    return t.hex;
+  /** Accent du site (étape B1) : en mode clair, la couleur la plus foncée de la palette (la classe
+   *  du haut) pour que les liens tiennent un contraste ≥ 4,5:1 sur le fond papier ; en mode sombre,
+   *  la troisième classe en partant du haut, assez claire pour le fond nuit. Toujours sans alpha. */
+  function accentHex(palette, dark = false) {
+    const sorted = [...palette.thresholds].sort((a, b) => b.min - a.min);
+    const t = dark ? sorted[Math.min(2, sorted.length - 1)] : sorted[0];
+    return t.hex.slice(0, 7);
   }
 
   // ------------------------------------------------------------ phrase de saison (accueil)
@@ -200,7 +209,8 @@
   }
   function applyAccent(palette) {
     if (typeof document === "undefined") return;
-    document.documentElement.style.setProperty("--accent", accentHex(palette));
+    document.documentElement.style.setProperty("--accent-day", accentHex(palette));
+    document.documentElement.style.setProperty("--accent-night", accentHex(palette, true));
   }
   async function loadPalette() {
     const r = await fetch("../shared/palette.json");
@@ -209,12 +219,15 @@
     applyAccent(palette);
     return palette;
   }
-  /** Légende : chaque couleur avec son mot, plus « transparent ». */
+  /** Légende : chaque couleur peinte avec son mot, puis ce que veut dire « transparent » (une
+   *  classe à alpha nul, comme « très faible » depuis l'étape B1, s'y ajoute). */
   function renderLegend(el, classes) {
     el.classList.add("legend");
+    const painted = [...classes].reverse().filter((c) => (c.rgba ?? hexToRgba(c.hex))[3] > 0);
+    const clear = [...classes].filter((c) => (c.rgba ?? hexToRgba(c.hex))[3] === 0).map((c) => c.fr.toLowerCase());
     el.innerHTML =
-      [...classes].reverse().map((c) => `<span><i style="background:${c.hex}"></i>${esc(c.fr)}</span>`).join("") +
-      `<span class="nodata"><i></i>Transparent : hors forêt ou sans donnée</span>`;
+      painted.map((c) => `<span><i style="background:${c.hex}"></i>${esc(c.fr)}</span>`).join("") +
+      `<span class="nodata"><i></i>Transparent : ${esc([...clear, "hors forêt ou sans donnée"].join(", "))}</span>`;
   }
   /** Onze pastilles datées de la fiche d'un point, en lecture seule (étape A, 6 nov. 2026 : la
    *  carte reste sur aujourd'hui, la fiche montre la semaine du point). `days` = [{ iso, value }],
@@ -238,7 +251,7 @@
   const Site = {
     WEEKDAYS, SHORT_WEEKDAYS, DAY_RANGE, SUPPORT_URL, APP_LINE,
     weekdayName, shortWeekday, frenchDate, shortDate, dateFor, whenWord, parisParts, computedPhrase, todayLine,
-    hexToRgb, sortedClasses, classify, accentHex, classCounts, seasonSentence,
+    hexToRgb, hexToRgba, sortedClasses, classify, accentHex, classCounts, seasonSentence,
     esc, inline, renderMarkdown, markdownTitle, apiBase, isDev,
     renderNav, applyAccent, loadPalette, renderLegend, renderDayDots,
   };

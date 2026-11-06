@@ -3,10 +3,11 @@
  * site.js après lecture de shared/palette.json), police système, coins arrondis, aucune ombre. */
 :root {
   --bg: #f8f6f0; --fg: #1c1b18; --muted: #6b6a64; --border: #ddd9cf; --panel: #fffdf8;
-  --accent: #5c6b5e; --accent-fg: #fff; --radius: 10px; --nav-h: 56px;
+  --accent-day: #5c6b5e; --accent-night: #a9b8aa;
+  --accent: var(--accent-day); --accent-fg: #fff; --radius: 10px; --nav-h: 56px;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #16181a; --fg: #ece9e2; --muted: #a09d95; --border: #33363a; --panel: #1e2124; }
+  :root { --bg: #16181a; --fg: #ece9e2; --muted: #a09d95; --border: #33363a; --panel: #1e2124; --accent: var(--accent-night); --accent-fg: #16181a; }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }

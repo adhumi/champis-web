@@ -73,7 +73,9 @@ const mode = () => ($("potential").checked ? "T" : "S"); // "T" ou "S"
 // La cellule météo est cherchée par bloc de pixels, pas par pixel (Field.blockPx : 16 px à partir
 // du zoom 9, moins en dessous), à moins de Field.MAX_CELL_KM (7,5 km), sinon le pixel est
 // transparent plutôt que de prendre la météo d'une cellule chargée pour une autre emprise.
-const OPACITY = 0.75; // opacité fixe de l'overlay (décision du 1er nov. 2026 : plus de réglage)
+// L'opacité vient de la palette, classe par classe (#RRGGBBAA, étape B1, 6 nov. 2026) : la couche
+// elle-même est opaque, « très faible » est transparent et le fond se lit là où rien ne pousse.
+const OPACITY = 1;
 // Tuiles décodées gardées en mémoire (T par espèce et A, ≈ 260 Ko chacune ; une tuile G compte
 // pour autant d'unités que de canaux, ses quatre T restant ensemble dans l'entrée) : changer de
 // jour, de mode ou de météo ne relit rien sur le réseau, seule la colorisation est refaite.
@@ -112,14 +114,9 @@ async function loadPalette() {
   palette = await r.json();
   classes = [...palette.thresholds]
     .sort((a, b) => b.min - a.min)
-    .map((t) => ({ ...t, rgb: hexToRgb(t.hex) }));
+    .map((t) => ({ ...t, rgb: Site.hexToRgb(t.hex), rgba: Site.hexToRgba(t.hex) }));
   Site.applyAccent(palette);
   Site.renderLegend($("legend"), classes);
-}
-
-function hexToRgb(hex) {
-  const n = parseInt(hex.slice(1, 7), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
 function classify(t) {
@@ -351,8 +348,9 @@ function paint(t) {
   const img = ctx.createImageData(TILE, TILE);
   for (let i = 0; i < t.length; i++) {
     if (Number.isNaN(t[i])) continue;
-    const [r, g, b] = classify(t[i]).rgb;
-    img.data.set([r, g, b, 255], i * 4);
+    const rgba = classify(t[i]).rgba;
+    if (rgba[3] === 0) continue; // classe transparente (« très faible ») : le fond reste visible
+    img.data.set(rgba, i * 4);
   }
   ctx.putImageData(img, 0, 0);
   return c;
