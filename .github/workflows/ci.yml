@@ -56,6 +56,21 @@ jobs:
       - name: Configuration Caddy valide
         run: docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
+      # L'image que Railway fera tourner : pages et référentiel servis, santé propre au site, relais
+      # vers l'API (ici une fausse API locale : pas de réseau, pas de dépendance à la production).
+      - name: Image du site (build, chemins servis, relais vers l'API)
+        run: |
+          docker build -t champis-web .
+          mkdir -p "$RUNNER_TEMP/api"
+          echo '{"relais":"ok"}' > "$RUNNER_TEMP/api/species"
+          echo '{"status":"api"}' > "$RUNNER_TEMP/api/health"
+          python3 -m http.server 8000 --bind 127.0.0.1 --directory "$RUNNER_TEMP/api" > /dev/null 2>&1 &
+          docker run -d --name site --network host -e CHAMPIS_API_UPSTREAM=http://127.0.0.1:8000 champis-web
+          for i in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:8080/health && break; sleep 1; done
+          sh scripts/smoke.sh http://localhost:8080
+          test "$(curl -sS http://localhost:8080/species)" = '{"relais":"ok"}'
+          docker logs site 2>&1 | tail -n 5
+
   # Railway ne récupère pas les sous-modules (build depuis un instantané sans .git) : la CI, qui a le
   # référentiel, déploie elle-même avec `railway up` après des tests verts sur main, ou à la main
   # (workflow_dispatch). RAILWAY_TOKEN : jeton de projet Railway (environnement production).

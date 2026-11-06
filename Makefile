@@ -26,6 +26,10 @@ check: ## Exactement la CI (hors validation Caddy, faite par la CI dans Docker)
 	$(UV) ruff format --check .
 	$(UV) pytest
 
+.PHONY: smoke
+smoke: ## Contrôle un site qui tourne : make smoke URL=https://champis.app (défaut http://localhost:8080)
+	sh scripts/smoke.sh $(URL)
+
 .PHONY: referential
 referential: ## Met le sous-module champis/ (référentiel) à la dernière version de main, à committer ici
 	git submodule update --init --remote champis

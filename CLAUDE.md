@@ -11,13 +11,15 @@ web/          pages (index, carte, comprendre, soutenir), site.js (fonctions pur
 web/tests/    pytest qui pilote node ; referential.py et pngtiles.py remplacent le paquet du pipeline
 champis/      sous-module adhumi/champis : shared/ (palette, textes), species/
 shared, species   liens vers champis/ pour le serveur local ; le Dockerfile copie les vrais dossiers
-Caddyfile     /web/, /shared/, /species/, / → /web/, /health
+Caddyfile     /web/, /shared/, /species/, / → /web/, /health ; le reste est relayé vers api.champis.app (anciennes versions de l'app)
+scripts/      smoke.sh : contrôle d'un site qui tourne (CI sur l'image, `make smoke URL=…` après un déploiement)
 ```
 
 ## Outillage
 
 - Premier clone : `git clone --recurse-submodules` ; `make setup` ; `make serve` puis http://localhost:8080/web/ (API locale de champis-api sur :8000, ou `?api=`).
-- `make check` = la CI (ruff, tests) ; la CI valide aussi le Caddyfile dans Docker.
+- `make check` = la CI (ruff, tests) ; la CI valide aussi le Caddyfile, construit l'image et la contrôle (`scripts/smoke.sh`, fausse API locale) dans Docker.
+- Le relais vers l'API (`handle` final du Caddyfile) sert les versions de l'app qui appellent encore `champis.app` : à retirer quand plus aucune ne le fait.
 - `make referential` amène `champis/` à la dernière version du référentiel ; le commit qui le déplace se fait ici, par PR.
 
 ## Règles
