@@ -65,7 +65,7 @@
   <script>
     Site.renderNav("index.html");
     Site.loadPalette()
-      .then((palette) => Site.renderLegend(document.getElementById("legend"), Site.sortedClasses(palette)))
+      .then((palette) => Site.renderLegend(document.getElementById("legend"), palette))
       .catch(() => {});
     if (Site.APP_LINE) {
       const line = document.getElementById("app-line");

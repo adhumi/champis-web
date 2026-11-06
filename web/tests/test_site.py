@@ -56,12 +56,28 @@ def test_french_dates_without_locale():
 def test_classes_follow_the_palette():
     cls = classes()
     assert [c["label"] for c in cls] == ["excellent", "bon", "moyen", "faible", "tres_faible"]
-    assert cls[1]["rgb"] == [0x4C, 0xA6, 0x4C]
+    bon = next(t["hex"] for t in load_palette()["thresholds"] if t["label"] == "bon")
+    assert cls[1]["rgb"] == [int(bon[i : i + 2], 16) for i in (1, 3, 5)]
     hi, lo, acc = call(
         ("classify", [cls, 0.8]), ("classify", [cls, 0.0]), ("accentHex", [load_palette()])
     )
     assert hi["fr"] == "Excellent" and lo["label"] == "tres_faible"
-    assert acc == next(t["hex"] for t in load_palette()["thresholds"] if t["label"] == "bon")
+    # l'accent du site est le violet de l'échelle (6 nov. 2026) ; le « Bon » sans `scale`
+    assert acc == load_palette()["scale"]["hex"]
+    legacy = {k: v for k, v in load_palette().items() if k != "scale"}
+    assert call(("accentHex", [legacy]))[0] == bon
+
+
+def test_pixel_color_matches_the_parity_vectors():
+    """Échelle linéaire (6 nov. 2026) : un violet, l'alpha est le score, arrondi floor(x + 0,5),
+    identique à Python (champis-api) et Swift (app) via shared/vectors/palette.json."""
+    vectors = json.loads((REFERENTIAL / "shared" / "vectors" / "palette.json").read_text())
+    cases = vectors["cases"]
+    got = call(*(("pixelColor", [load_palette(), c["score"]]) for c in cases))
+    for c, rgba in zip(cases, got, strict=True):
+        assert rgba == c["expected"]["rgba"], c["score"]
+    # les demi-niveaux d'arrondi sont bien couverts par les vecteurs
+    assert any(abs(c["score"] - 0.5 / 255) < 1e-12 for c in cases)
 
 
 def test_season_sentence_counts_departements_by_class_and_never_invents():

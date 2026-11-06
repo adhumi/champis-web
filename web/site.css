@@ -1,5 +1,5 @@
 /* Identité du site (refonte UX, lot 5) : les mots et les couleurs de l'app sans son verre.
- * Fond papier clair ou sombre selon le système, accent = le vert « Bon » de la palette (posé par
+ * Fond papier clair ou sombre selon le système, accent = le violet de l'échelle de la palette (posé par
  * site.js après lecture de shared/palette.json), police système, coins arrondis, aucune ombre. */
 :root {
   --bg: #f8f6f0; --fg: #1c1b18; --muted: #6b6a64; --border: #ddd9cf; --panel: #fffdf8;
@@ -61,11 +61,16 @@ footer.site-footer {
 footer.site-footer a { color: var(--muted); }
 .app-line { color: var(--muted); font-size: .875rem; }
 
-/* Légende : cinq pastilles, toujours avec leur mot */
+/* Légende : une barre continue du transparent au violet, les cinq mots à leur seuil (échelle
+   linéaire, 6 nov. 2026) ; sans `scale`, cinq pastilles avec leur mot. Le liseré des pastilles
+   garde « très faible » visible sur le papier. */
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .875rem; }
-.legend span { display: inline-flex; align-items: center; gap: 6px; }
-.legend i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; }
-.legend .nodata i { border: 1px solid var(--border); }
+.legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--border); }
+.legend .scale { flex: 1 1 100%; max-width: 420px; }
+.legend .scale .bar { height: 12px; border-radius: 6px; border: 1px solid var(--border); background-color: var(--panel); }
+.legend .scale .words { position: relative; height: 1.4em; margin-top: 2px; font-size: .8125rem; color: var(--muted); }
+.legend .scale .words span { position: absolute; top: 0; white-space: nowrap; }
 
 /* Onze pastilles datées de la fiche d'un point (lecture seule, étape A) */
 .days { display: grid; grid-template-columns: repeat(11, 1fr); gap: 2px; margin: 6px 0 8px; }
