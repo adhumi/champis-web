@@ -4,8 +4,8 @@ Quatre pages statiques, sans build (MapLibre GL et PMTiles copiés dans `web/ven
 
 | Page | Rôle |
 | --- | --- |
-| `index.html` | Accueil (étape C, lot C3, 6 nov. 2026) : l'accroche « La météo des champignons, forêt par forêt. » et la promesse, « Ouvrir la carte », les trois questions (où, quand, pourquoi), la légende lue dans la palette et les règles en clair, chacune avec son lien vers le Guide. Seule requête à l'API : la palette. Les anciens liens vers la carte (`index.html#11/47/6`, `?tiles=…`, `?dev=1`) y vont toujours. Le logo de l'en-tête y ramène. |
-| `carte.html` (Carte) | La carte à la parcelle de la phase 1, alignée sur l'app : panneau fixe à droite (360 px) sur ordinateur, plein écran sur téléphone (panneau replié en haut, fiche fixe au-dessus de la barre d'onglets). La carte montre toujours aujourd'hui : une ligne en bas à gauche le dit, avec l'heure de calcul de la météo en heure de Paris (étape A, 6 nov. 2026). Opacité fixe, fond de carte dans le panneau, fiche en clair avec ses onze jours, leur tendance (« mieux samedi 7 », « stable toute la semaine », « en baisse ») et le statut de la forêt, puis « Détails » (étape B, 6 nov. 2026). Recherche de commune en tête du panneau (« Rechercher » sur téléphone) et bouton « me localiser » de MapLibre. |
+| `index.html` | Accueil (étape C, lot C3, 6 nov. 2026) : l'accroche « La météo des champignons, forêt par forêt. » et la promesse, « Ouvrir la carte », les trois questions (où, quand, pourquoi), la légende lue dans la palette et les règles en clair, chacune avec son lien vers le Guide. Seule requête à l'API : la palette (légende en barre continue depuis le 6 nov. 2026). Les anciens liens vers la carte (`index.html#11/47/6`, `?tiles=…`, `?dev=1`) y vont toujours. Le logo de l'en-tête y ramène. |
+| `carte.html` (Carte) | La carte à la parcelle de la phase 1, alignée sur l'app : panneau fixe à droite (360 px) sur ordinateur, plein écran sur téléphone (panneau replié en haut, fiche fixe au-dessus de la barre d'onglets). La carte montre toujours aujourd'hui : une ligne en bas à gauche le dit, avec l'heure de calcul de la météo en heure de Paris (étape A, 6 nov. 2026). Couche opaque, l'alpha de chaque pixel est son score (un seul violet, `shared/palette.json › scale`, échelle linéaire du 6 nov. 2026), fond de carte dans le panneau, fiche en clair avec ses onze jours, leur tendance (« mieux samedi 7 », « stable toute la semaine », « en baisse ») et le statut de la forêt, puis « Détails » (étape B, 6 nov. 2026). Recherche de commune en tête du panneau (« Rechercher » sur téléphone) et bouton « me localiser » de MapLibre. |
 | `comprendre.html` (Guide) | Les articles de `shared/texts/` (Markdown rendu par `Site.renderMarkdown`) et les fiches d'espèces du bloc `about` de `GET /species` (`?article=especes&espece=<id>`), en colonne de lecture de 680 px. |
 | `soutenir.html` | Page de dons sobre. Le lien de paiement est `Site.SUPPORT_URL` dans `site.js` (`null` tant qu'Adrien ne l'a pas renseigné : la page explique en attendant). |
 
@@ -13,7 +13,7 @@ Navigation : en-tête sur ordinateur (Carte, Guide, et Soutenir à droite), barr
 
 ## Identité (`site.css`)
 
-Fond papier clair ou sombre selon le système, accent = le vert « Bon » de la palette, posé en variable CSS par `site.js` après lecture de `shared/palette.json` ; `system-ui`, coins arrondis, aucune ombre portée. Le logo (`logo.svg`) reprend les formes de l'icône de l'app.
+Fond papier clair ou sombre selon le système, accent = le violet de l'échelle (`scale.hex` de la palette ; le vert « Bon » sans `scale`), posé en variable CSS par `site.js` après lecture de `shared/palette.json` ; `system-ui`, coins arrondis, aucune ombre portée. Le logo (`logo.svg`) reprend les formes de l'icône de l'app.
 
 ## Services de l'IGN (étapes B3 et B5)
 
@@ -57,7 +57,7 @@ Les deux réponses sont fusionnées par `field.js` dans la même structure de ce
 
 ## Ce que fait le code
 
-- `site.js` : fonctions pures partagées (dates en français sans locale, classes de la palette, phrase de saison, Markdown, adresse de l'API) exportées pour node, plus la navigation, la légende, la ligne « Aujourd'hui · météo calculée à … » et les pastilles de la fiche côté navigateur. Testé par `web/tests/test_site.py`.
+- `site.js` : fonctions pures partagées (dates en français sans locale, classes de la palette et couleur d'un pixel `pixelColor` validée par les vecteurs de parité, phrase de saison, Markdown, adresse de l'API) exportées pour node, plus la navigation, la légende, la ligne « Aujourd'hui · météo calculée à … » et les pastilles de la fiche côté navigateur. Testé par `web/tests/test_site.py`.
 - `app.js` : la carte (couche par espèce ou max du groupe, colorisation côté client, météo, ligne du jour, fiche en clair avec ses onze jours). `field.js` : fonctions pures de la météo de la carte (source selon le zoom, fusion bbox/field, index spatial, classe d'altitude et facteur d'un pixel), exportées pour node et testées par `web/tests/test_field.py`. `groups.js` : fonctions pures des PMTiles par groupe (séparation des canaux d'un G en T par espèce, plan de lecture d'une couche, ordre des canaux d'un G glissé-déposé), testées par `web/tests/test_groups.py`. `png.js` décode les PNG de données octet par octet, jamais par canvas (Safari trame les gris) ; testé par `web/tests/test_png_decoder.py`.
 - `comprendre.js` : le Guide.
 - Position de la carte dans l'URL (`#zoom/lat/lon`) pour partager une vue.

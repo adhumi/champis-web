@@ -1,7 +1,7 @@
 /* Page Carte du site (carte.html) : potentiel terrain T (PMTiles gris 8 bits par espèce, ou un
  * PMTiles RGBA par groupe d'affichage — G — dès qu'il est publié, spec › Points ouverts › Les
  * clients lisent les PMTiles par groupe, 5 nov. 2026) colorisé côté client avec
- * shared/palette.json, et score du jour S = T × M_eff × Φ avec les valeurs de l'API
+ * shared/palette.json (un violet dont l'alpha est le score), et score du jour S = T × M_eff × Φ avec les valeurs de l'API
  * (/weather/bbox à partir du zoom 9 : M_eff et Φ par cellule 5 km, onze jours et classe
  * d'altitude ; /weather/field en dessous : M_eff × Φ du jour courant sur toute l'emprise, spec ›
  * Points ouverts › Carte visible dès l'ouverture, 4 nov. 2026). Aucune valeur de modèle ici :
@@ -73,7 +73,7 @@ const mode = () => ($("potential").checked ? "T" : "S"); // "T" ou "S"
 // La cellule météo est cherchée par bloc de pixels, pas par pixel (Field.blockPx : 16 px à partir
 // du zoom 9, moins en dessous), à moins de Field.MAX_CELL_KM (7,5 km), sinon le pixel est
 // transparent plutôt que de prendre la météo d'une cellule chargée pour une autre emprise.
-const OPACITY = 0.75; // opacité fixe de l'overlay (décision du 1er nov. 2026 : plus de réglage)
+const OPACITY = 1; // l'alpha de chaque pixel est son score (échelle linéaire, 6 nov. 2026) : couche opaque
 // Tuiles décodées gardées en mémoire (T par espèce et A, ≈ 260 Ko chacune ; une tuile G compte
 // pour autant d'unités que de canaux, ses quatre T restant ensemble dans l'entrée) : changer de
 // jour, de mode ou de météo ne relit rien sur le réseau, seule la colorisation est refaite.
@@ -114,7 +114,7 @@ async function loadPalette() {
     .sort((a, b) => b.min - a.min)
     .map((t) => ({ ...t, rgb: hexToRgb(t.hex) }));
   Site.applyAccent(palette);
-  Site.renderLegend($("legend"), classes);
+  Site.renderLegend($("legend"), palette);
 }
 
 function hexToRgb(hex) {
@@ -344,15 +344,15 @@ function currentDate() {
   return weather.today ?? null;
 }
 
-/** Classes → pixels colorés sur un canevas (synchrone) ; l'encodage PNG est à part (asynchrone). */
+/** Valeurs → pixels colorés sur un canevas (synchrone) ; l'encodage PNG est à part (asynchrone).
+ *  Un seul violet, l'alpha est le score (`Site.pixelColor`) ; NaN reste transparent. */
 function paint(t) {
   const c = new OffscreenCanvas(TILE, TILE);
   const ctx = c.getContext("2d");
   const img = ctx.createImageData(TILE, TILE);
   for (let i = 0; i < t.length; i++) {
     if (Number.isNaN(t[i])) continue;
-    const [r, g, b] = classify(t[i]).rgb;
-    img.data.set([r, g, b, 255], i * 4);
+    img.data.set(Site.pixelColor(palette, t[i]), i * 4);
   }
   ctx.putImageData(img, 0, 0);
   return c;
@@ -391,7 +391,7 @@ maplibregl.addProtocol("champis", async (params) => {
 });
 
 // Temps processeur de colorisation (combine : météo et max du groupe par pixel ; peinture :
-// classes → pixels, hors encodage PNG asynchrone), affiché en mode dev : « Colorisation : N
+// valeurs → pixels, hors encodage PNG asynchrone), affiché en mode dev : « Colorisation : N
 // tuiles, X ms » pour vérifier qu'un écran au zoom 6 tient sous la seconde.
 const renderStats = { tiles: 0, ms: 0, combineMs: 0 };
 let renderStatsTimer = null;

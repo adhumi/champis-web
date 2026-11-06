@@ -137,8 +137,18 @@
   function classify(classes, v) {
     return classes.find((c) => v >= c.min) ?? classes[classes.length - 1];
   }
-  /** Le vert « Bon » de la palette sert d'accent au site ; à défaut, la classe du milieu. */
+  /** Couleur d'un pixel de score `v` (échelle linéaire, décision du 6 nov. 2026) : `rgb` de
+   *  `scale.hex`, alpha = floor(255 × (alpha_min + (alpha_max − alpha_min) × v) + 0,5), `v` borné à
+   *  [0, 1]. `Math.floor(x + 0.5)` et non `Math.round` : même arrondi qu'en Python et en Swift
+   *  (skill scoring-parity, vecteurs shared/vectors/palette.json). Les seuils ne donnent que les mots. */
+  function pixelColor(palette, v) {
+    const { hex, alpha_min: lo, alpha_max: hi } = palette.scale;
+    const s = Math.min(Math.max(v, 0), 1);
+    return [...hexToRgb(hex), Math.floor(255 * (lo + (hi - lo) * s) + 0.5)];
+  }
+  /** Le violet de l'échelle sert d'accent au site ; sans `scale` (API ancienne), le « Bon ». */
   function accentHex(palette) {
+    if (palette.scale) return palette.scale.hex;
     const t = palette.thresholds.find((x) => x.label === "bon") ?? palette.thresholds[Math.floor(palette.thresholds.length / 2)];
     return t.hex;
   }
@@ -274,12 +284,34 @@
     applyAccent(palette);
     return palette;
   }
-  /** Légende : chaque couleur avec son mot, plus « transparent ». */
-  function renderLegend(el, classes) {
+  /** Légende : une barre continue du transparent au violet de l'échelle, les cinq mots posés à
+   *  leur seuil (échelle linéaire, 6 nov. 2026), puis « transparent ». Sans `scale` (API
+   *  ancienne), une pastille par mot. */
+  function renderLegend(el, palette) {
+    const classes = sortedClasses(palette);
     el.classList.add("legend");
+    const nodata = `<span class="nodata"><i></i>Transparent : hors forêt ou sans donnée</span>`;
+    if (!palette.scale) {
+      el.innerHTML =
+        [...classes].reverse().map((c) => `<span><i style="background:${c.hex}"></i>${esc(c.fr)}</span>`).join("") + nodata;
+      return;
+    }
+    const [r, g, b] = hexToRgb(palette.scale.hex);
+    // chaque mot au milieu de sa classe (comme la pastille de son `hex`) ; le premier et le
+    // dernier restent dans la barre
+    const asc = [...classes].reverse();
+    const words = asc
+      .map((c, i) => {
+        const mid = (c.min + (asc[i + 1]?.min ?? 1)) / 2;
+        const at = i === 0 ? "left:0" : i === asc.length - 1 ? "right:0" : `left:${(mid * 100).toFixed(1)}%;transform:translateX(-50%)`;
+        return `<span style="${at}">${esc(c.fr)}</span>`;
+      })
+      .join("");
     el.innerHTML =
-      [...classes].reverse().map((c) => `<span><i style="background:${c.hex}"></i>${esc(c.fr)}</span>`).join("") +
-      `<span class="nodata"><i></i>Transparent : hors forêt ou sans donnée</span>`;
+      `<div class="scale" role="img" aria-label="${esc(classes.map((c) => c.fr).reverse().join(", "))} : du transparent au violet foncé">` +
+      `<div class="bar" style="background-image:linear-gradient(to right, rgba(${r},${g},${b},0), ${palette.scale.hex})"></div>` +
+      `<div class="words">${words}</div></div>` +
+      nodata;
   }
   /** Onze pastilles datées de la fiche d'un point, en lecture seule (étape A, 6 nov. 2026 : la
    *  carte reste sur aujourd'hui, la fiche montre la semaine du point). `days` = [{ iso, value }],
@@ -304,7 +336,7 @@
     WEEKDAYS, SHORT_WEEKDAYS, DAY_RANGE, SUPPORT_URL, APP_LINE, CONTACT_EMAIL, API_URL,
     weekdayName, shortWeekday, frenchDate, shortDate, dateFor, whenWord, parisParts, computedPhrase, todayLine,
     trend, trendPhrase, geocodeUrl, geocodeResults, forestUrl, forestPhrase,
-    hexToRgb, sortedClasses, classify, accentHex, classCounts, seasonSentence,
+    hexToRgb, sortedClasses, classify, pixelColor, accentHex, classCounts, seasonSentence,
     esc, inline, renderMarkdown, markdownTitle, apiBase, isDev,
     renderNav, applyAccent, loadPalette, renderLegend, renderDayDots,
   };
