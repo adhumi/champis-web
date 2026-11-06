@@ -80,6 +80,18 @@ footer.site-footer a { color: var(--muted); }
 
 /* Colonne de lecture */
 .reading { max-width: 680px; margin: 0 auto; padding: 24px 20px 40px; }
+
+/* Accueil (étape C, lot C3) : la promesse, trois questions, cinq couleurs, les règles */
+.home { max-width: 960px; width: 100%; margin: 0 auto; padding: 40px 20px 48px; }
+.home .hero h1 { font-size: clamp(1.9rem, 4.5vw, 2.8rem); line-height: 1.12; margin-bottom: .7rem; max-width: 22ch; }
+.home .lead { font-size: 1.15rem; color: var(--muted); max-width: 38rem; }
+.home .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 1.4rem; }
+.home .questions { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 2.4rem 0 1rem; }
+.home .questions h2 { font-size: 1.1rem; margin: 0 0 .3rem; }
+.home .questions p { margin: 0; }
+.home section > h2 { margin-top: 2rem; }
+.home .rules { padding-left: 1.2rem; max-width: 46rem; }
+.home .rules li { margin: .45rem 0; }
 .reading h1 { font-size: 1.8rem; margin-bottom: 1rem; }
 .reading h2 { margin-top: 1.6rem; }
 .reading ul { padding-left: 1.2rem; }

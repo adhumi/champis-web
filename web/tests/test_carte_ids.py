@@ -30,7 +30,7 @@ def test_every_id_used_by_app_js_exists_in_carte_html():
     assert ids_used_by(js) - ids_in(html) - dynamic == set()
 
 
-@pytest.mark.parametrize("page", ["carte.html", "comprendre.html", "soutenir.html"])
+@pytest.mark.parametrize("page", ["index.html", "carte.html", "comprendre.html", "soutenir.html"])
 def test_every_page_has_the_shared_chrome(page: str):
     html = (WEB / page).read_text(encoding="utf-8")
     assert {"site-header", "site-tabs"} <= ids_in(html)
@@ -62,3 +62,29 @@ def test_the_map_stays_on_today_and_the_probe_shows_the_week():
         assert name not in app, name
     assert 'id="strip"' not in html and 'id="today-line"' in html
     assert "Site.renderDayDots" in app and "Site.todayLine" in app
+
+
+def test_no_third_party_cdn():
+    """Étape C, lot C1 (6 nov. 2026) : aucune page ne charge de bibliothèque depuis un tiers ;
+    MapLibre et PMTiles sont servis par Champis depuis `web/vendor/`, qui existe bien."""
+    for page in sorted(WEB.glob("*.html")):
+        html = page.read_text(encoding="utf-8")
+        assert "unpkg.com" not in html and "cdn." not in html, page.name
+        for src in re.findall(r'(?:src|href)="(vendor/[^"]+)"', html):
+            assert (WEB / src).is_file(), src
+
+
+def test_home_page_carries_the_promise_and_keeps_old_map_links():
+    """Étape C, lot C3 : l'accueil porte l'accroche décidée et la promesse, mène à la carte, et
+    renvoie toujours vers la carte les anciens liens (`index.html#11/47/6`, `?tiles=…`)."""
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    assert "La météo des champignons, forêt par forêt." in html
+    assert (
+        "Où et quand poussent cèpes et girolles, forêt par forêt, jour par jour. Gratuit, sans compte."
+        in html
+    )
+    assert 'href="carte.html"' in html
+    assert 'name="robots" content="noindex"' in html
+    assert 'location.replace("carte.html" + location.search + location.hash)' in html
+    for article in ("cueillir-sans-nuire", "donnees-et-sources", "confidentialite"):
+        assert f"comprendre.html?article={article}" in html

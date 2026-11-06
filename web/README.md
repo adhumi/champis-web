@@ -1,10 +1,10 @@
 # web — le site champis.app
 
-Quatre pages statiques, sans build (MapLibre GL et PMTiles par CDN), servies par champis-api sous `/web/` (`CHAMPIS_SERVE_WEB=1`, le défaut) avec `/shared/` et `/species/` à côté : la page lit `shared/palette.json`, `shared/texts/` et `species/<id>.json` aux mêmes chemins qu'en local. Refonte UX, lot 5 (1er nov. 2026) : même structure et même vocabulaire que l'app, sans l'identité Apple.
+Quatre pages statiques, sans build (MapLibre GL et PMTiles copiés dans `web/vendor/`, plus aucun CDN tiers depuis l'étape C), servies par champis-api sous `/web/` (`CHAMPIS_SERVE_WEB=1`, le défaut) avec `/shared/` et `/species/` à côté : la page lit `shared/palette.json`, `shared/texts/` et `species/<id>.json` aux mêmes chemins qu'en local. Refonte UX, lot 5 (1er nov. 2026) : même structure et même vocabulaire que l'app, sans l'identité Apple.
 
 | Page | Rôle |
 | --- | --- |
-| `index.html` | Redirige vers `carte.html` : le site s'ouvre sur la carte (il n'y a plus d'onglet Aujourd'hui, 5 nov. 2026). |
+| `index.html` | Accueil (étape C, lot C3, 6 nov. 2026) : l'accroche « La météo des champignons, forêt par forêt. » et la promesse, « Ouvrir la carte », les trois questions (où, quand, pourquoi), la légende lue dans la palette et les règles en clair, chacune avec son lien vers le Guide. Seule requête à l'API : la palette. Les anciens liens vers la carte (`index.html#11/47/6`, `?tiles=…`, `?dev=1`) y vont toujours. Le logo de l'en-tête y ramène. |
 | `carte.html` (Carte) | La carte à la parcelle de la phase 1, alignée sur l'app : panneau fixe à droite (360 px) sur ordinateur, plein écran sur téléphone (panneau replié en haut, fiche fixe au-dessus de la barre d'onglets). La carte montre toujours aujourd'hui : une ligne en bas à gauche le dit, avec l'heure de calcul de la météo en heure de Paris (étape A, 6 nov. 2026). Opacité fixe, fond de carte dans le panneau, fiche en clair avec ses onze jours, leur tendance (« mieux samedi 7 », « stable toute la semaine », « en baisse ») et le statut de la forêt, puis « Détails » (étape B, 6 nov. 2026). Recherche de commune en tête du panneau (« Rechercher » sur téléphone) et bouton « me localiser » de MapLibre. |
 | `comprendre.html` (Guide) | Les articles de `shared/texts/` (Markdown rendu par `Site.renderMarkdown`) et les fiches d'espèces du bloc `about` de `GET /species` (`?article=especes&espece=<id>`), en colonne de lecture de 680 px. |
 | `soutenir.html` | Page de dons sobre. Le lien de paiement est `Site.SUPPORT_URL` dans `site.js` (`null` tant qu'Adrien ne l'a pas renseigné : la page explique en attendant). |
@@ -24,6 +24,10 @@ Même hôte que le fond Plan IGN (`data.geopf.fr`, CORS ouvert, sans clé) : auc
 - **Me localiser** : `maplibregl.GeolocateControl`, la position reste dans le navigateur.
 
 Ce qui part chez l'IGN est dit dans `shared/texts/confidentialite.md`.
+
+## Aucun tiers non nécessaire (étape C, lot C1)
+
+MapLibre GL 4.7.1 et PMTiles 3.2.1 sont servis par Champis depuis `web/vendor/` (provenance, licences et empreintes npm dans `web/vendor/README.md`). Le navigateur ne contacte plus que Champis, la Géoplateforme de l'IGN (fond Plan IGN, recherche, forêts publiques) et, si on le choisit, OpenStreetMap ; `confidentialite.md` le dit. Mentions légales : `shared/texts/mentions-legales.md`, en lien dans le pied de chaque page.
 
 ## Lancer
 

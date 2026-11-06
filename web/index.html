@@ -2,10 +2,76 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="robots" content="noindex" />
-  <meta http-equiv="refresh" content="0; url=carte.html" />
-  <title>Champis</title>
-  <script>location.replace("carte.html" + location.search + location.hash);</script>
+  <meta name="description" content="La météo des champignons, forêt par forêt. Où et quand poussent cèpes et girolles, forêt par forêt, jour par jour. Gratuit, sans compte." />
+  <title>Champis — la météo des champignons</title>
+  <link rel="icon" href="logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="site.css" />
+  <script>
+    // anciens liens vers la carte (index.html#zoom/lat/lon, ?tiles=…, ?dev=1) : ils y vont toujours
+    if (/^#\d/.test(location.hash) || location.search) location.replace("carte.html" + location.search + location.hash);
+  </script>
 </head>
-<body><a href="carte.html">Ouvrir la carte</a></body>
+<body>
+  <header id="site-header"></header>
+  <!-- Accueil (étape C, lot C3, 6 nov. 2026) : la promesse, l'entrée vers la carte, les trois
+       questions et les règles en clair. Rien n'est chargé de l'API sauf la palette. -->
+  <main class="home">
+    <section class="hero">
+      <h1>La météo des champignons, forêt par forêt.</h1>
+      <p class="lead">Où et quand poussent cèpes et girolles, forêt par forêt, jour par jour. Gratuit, sans compte.</p>
+      <p class="actions">
+        <a class="button" href="carte.html">Ouvrir la carte</a>
+        <a class="button quiet" href="comprendre.html">Comment ça marche</a>
+      </p>
+      <p id="app-line" class="small muted" hidden></p>
+    </section>
+
+    <section class="questions" aria-label="Trois questions">
+      <article class="card">
+        <h2>Où ?</h2>
+        <p>La carte colore chaque carré de forêt de 25 mètres selon les conditions du jour : le terrain, la météo des dernières semaines et la saison de l'espèce.</p>
+      </article>
+      <article class="card">
+        <h2>Quand ?</h2>
+        <p>Chaque point de la carte montre ses onze jours, de trois jours avant à sept jours après, avec la tendance et le meilleur jour à venir.</p>
+      </article>
+      <article class="card">
+        <h2>Pourquoi ?</h2>
+        <p>Le <a href="comprendre.html">Guide</a> explique le modèle, ses sources et les règles de chaque espèce, chacune appuyée sur une publication citée.</p>
+      </article>
+    </section>
+
+    <section>
+      <h2>Cinq mots, cinq couleurs</h2>
+      <div id="legend"></div>
+      <p class="small muted">La couleur ne dit jamais « il y en a » : elle dit « les conditions sont réunies ».</p>
+    </section>
+
+    <section>
+      <h2>Les règles</h2>
+      <ul class="rules">
+        <li><strong>Gratuit, sans compte, sans publicité.</strong> L'infrastructure est financée par des dons, à hauteur de ce qu'elle coûte : <a href="soutenir.html">soutenir Champis</a>.</li>
+        <li><strong>Un potentiel, pas une autorisation.</strong> En forêt privée, il faut l'accord du propriétaire ; en forêt publique, la cueillette familiale est tolérée, sauf arrêté : <a href="comprendre.html?article=cueillir-sans-nuire">cueillir sans nuire</a>.</li>
+        <li><strong>Des données publiques.</strong> Les forêts et le relief de l'IGN, la météo d'Open-Meteo, les sols de SoilGrids : <a href="comprendre.html?article=donnees-et-sources">les données et leurs sources</a>.</li>
+        <li><strong>Rien qui vous identifie.</strong> Pas de cookie, pas d'outil de mesure d'audience : <a href="comprendre.html?article=confidentialite">confidentialité</a>.</li>
+      </ul>
+    </section>
+  </main>
+  <nav id="site-tabs" aria-label="Pages"></nav>
+  <footer class="site-footer"></footer>
+  <script src="site.js"></script>
+  <script>
+    Site.renderNav("index.html");
+    Site.loadPalette()
+      .then((palette) => Site.renderLegend(document.getElementById("legend"), Site.sortedClasses(palette)))
+      .catch(() => {});
+    if (Site.APP_LINE) {
+      const line = document.getElementById("app-line");
+      line.textContent = Site.APP_LINE;
+      line.hidden = false;
+    }
+  </script>
+</body>
 </html>

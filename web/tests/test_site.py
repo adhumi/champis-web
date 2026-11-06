@@ -258,3 +258,25 @@ def test_forest_status_from_the_onf_public_forests_layer():
     )
     assert communale.startswith("Forêt communale de Mouthe : forêt publique")
     assert private.startswith("Pas une forêt publique connue")
+
+
+def test_markdown_links_accept_mail_addresses():
+    """Étape C, lot C1 : l'adresse de contact des textes légaux est un lien `mailto:` ; un lien
+    vers autre chose qu'`http(s)` ou `mailto` reste du texte."""
+    mail, other = call(
+        ("inline", ["Contact : [hello@champis.app](mailto:hello@champis.app)."]),
+        ("inline", ["[clic](javascript:alert(1))"]),
+    )
+    assert (
+        mail == 'Contact : <a href="mailto:hello@champis.app" rel="noopener">hello@champis.app</a>.'
+    )
+    assert "<a" not in other
+
+
+def test_contact_address_is_the_one_of_the_legal_notice():
+    """Le lien « Contact » du pied de page et les mentions légales donnent la même adresse."""
+    source = (HERE.parent / "site.js").read_text(encoding="utf-8")
+    assert 'const CONTACT_EMAIL = "hello@champis.app";' in source
+    assert 'href="mailto:${CONTACT_EMAIL}"' in source
+    legal = (ROOT / "shared" / "texts" / "mentions-legales.md").read_text(encoding="utf-8")
+    assert "hello@champis.app" in legal
