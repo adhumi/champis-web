@@ -419,6 +419,8 @@ const map = new maplibregl.Map({
   attributionControl: { compact: false },
 });
 map.addControl(new maplibregl.NavigationControl(), "top-right");
+// « autour de moi » (étape B3) : la position reste dans le navigateur, rien n'est envoyé à Champis
+map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: false }), "top-right");
 map.addControl(new maplibregl.ScaleControl(), "bottom-right");
 
 function setBasemap(name) {
@@ -814,8 +816,11 @@ function terrainPhrase(t) {
 const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
 /** Fiche en clair (lot 2) : libellé et jour, espèce, phrases, les onze jours du point (étape A,
- *  en lecture seule : la carte reste sur aujourd'hui), puis les chiffres derrière Détails. */
-function renderProbe({ value, name, phrases, details, days = null }) {
+ *  en lecture seule : la carte reste sur aujourd'hui) avec leur tendance (étape B2), le statut de
+ *  la forêt (étape B5), puis les chiffres derrière Détails. */
+function renderProbe({ value, name, phrases, details, days = null, forest = null }) {
+  const good = classes.find((c) => c.label === "bon")?.min ?? 1;
+  const trendText = days ? Site.trendPhrase(Site.trend(days, weather.today, good)) : null;
   const cls = classify(value);
   const when = currentDate() ? Site.whenWord(currentDate(), weather.today) : "";
   const sub = [name, currentDate() ? frenchDate(currentDate()) : ""].filter(Boolean).join(" · ");
@@ -824,6 +829,8 @@ function renderProbe({ value, name, phrases, details, days = null }) {
     `<div class="sub">${esc(sub)}</div>` +
     (phrases.length ? `<ul>${phrases.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : "") +
     (days ? `<div id="probe-days" aria-label="Les onze jours de ce point"></div>` : "") +
+    (trendText ? `<p class="trend">Tendance : ${esc(trendText)}</p>` : "") +
+    (forest ? `<p class="forest">${esc(forest)}</p>` : "") +
     `<details><summary>Détails</summary><div>${esc(details)}</div></details>` +
     `<button type="button" class="button quiet small" id="probe-close">Fermer</button>`;
   $("probe-close").addEventListener("click", () => (probe.style.display = "none"));
@@ -858,6 +865,17 @@ function pointDays(body, tBySid, altKey) {
 
 let probeToken = 0; // un clic plus récent rend caduque la réponse d'un clic précédent
 
+/** Statut de la forêt au point (étape B5) : forêt publique de l'ONF ou non, par le WFS de l'IGN ;
+ *  null si le service ne répond pas (la fiche n'affiche alors pas de ligne). */
+async function fetchForest(lat, lon) {
+  try {
+    const r = await fetch(Site.forestUrl(lat, lon));
+    return r.ok ? Site.forestPhrase(await r.json()) : null;
+  } catch {
+    return null;
+  }
+}
+
 map.on("click", async (e) => {
   if (!currentKey) return;
   const token = ++probeToken;
@@ -890,10 +908,21 @@ map.on("click", async (e) => {
   }
   const name = species.get(best.sid)?.names.fr ?? best.sid;
   const { class_m, nodata } = palette.alt_encoding;
+  // statut de la forêt en parallèle : la fiche s'affiche sans l'attendre et le gagne à son arrivée
+  let shown = null;
+  let forest = null;
+  const show = (p) => {
+    shown = p;
+    renderProbe({ ...p, forest });
+  };
+  fetchForest(e.lngLat.lat, e.lngLat.lng).then((f) => {
+    forest = f;
+    if (f && shown && token === probeToken) show(shown);
+  });
   if (mode() === "T") {
     // sans météo, la classe vient de la couche A seule (pas de cellule pour s'y rabattre)
     const alt = altIdx !== null && altIdx !== nodata ? `altitude ${altIdx * class_m}–${(altIdx + 1) * class_m} m` : "altitude inconnue";
-    renderProbe({
+    show({
       value: best.T,
       name,
       phrases: [terrainPhrase(best.T), "potentiel toute saison, sans la météo"],
@@ -907,7 +936,7 @@ map.on("click", async (e) => {
   const w = best.v / best.T;
   const altKey = String(Field.altCenter(cell, altIdx, palette.alt_encoding));
   const altTxt = altLayer && altIdx !== null && altIdx !== nodata ? "" : " (médiane cellule)";
-  renderProbe({ value: best.v, name, phrases: [terrainPhrase(best.T), "météo : chargement…"], details: "…" });
+  show({ value: best.v, name, phrases: [terrainPhrase(best.T), "météo : chargement…"], details: "…" });
   const tBySid = Object.fromEntries(arrays.filter(({ t }) => !Number.isNaN(t[i])).map(({ sid, t }) => [sid, t[i]]));
   const body = await fetchPoint(cell.id, Object.keys(tBySid)).catch(() => null);
   if (token !== probeToken) return;
@@ -917,7 +946,7 @@ map.on("click", async (e) => {
   const factorsTxt = factors
     ? Object.entries(factors).filter(([k]) => k !== "M").map(([k, v]) => `${k} ${(+v).toFixed(2)}`).join(" · ")
     : "facteurs indisponibles";
-  renderProbe({
+  show({
     value: best.v,
     name,
     phrases: [terrainPhrase(best.T), ...summary],
@@ -926,4 +955,52 @@ map.on("click", async (e) => {
       `S = ${best.v.toFixed(3)} · T ${best.T.toFixed(2)} × M_eff·Φ ${w.toFixed(2)} · cellule ${cell.id}` +
       ` · classe ${altKey} m${altTxt}${cell.stale ? " · météo périmée" : ""}\n${factorsTxt}`,
   });
+});
+
+// ---------------------------------------------------------------- recherche de commune (étape B3)
+
+let searchTimer = null;
+let searchAbort = null;
+const searchResults = $("search-results");
+$("search-q").addEventListener("input", (e) => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  if (q.length < 3) {
+    searchResults.hidden = true;
+    return;
+  }
+  searchTimer = setTimeout(async () => {
+    searchAbort?.abort();
+    searchAbort = new AbortController();
+    try {
+      const r = await fetch(Site.geocodeUrl(q), { signal: searchAbort.signal });
+      const found = r.ok ? Site.geocodeResults(await r.json()) : [];
+      searchResults.innerHTML = found.length
+        ? found.map((f, k) => `<li><button type="button" data-k="${k}">${esc(f.label)} <small>${esc(f.context)}</small></button></li>`).join("")
+        : `<li class="note">Aucune commune trouvée.</li>`;
+      searchResults.hidden = false;
+      searchResults.querySelectorAll("button").forEach((b) =>
+        b.addEventListener("click", () => {
+          const f = found[+b.dataset.k];
+          map.flyTo({ center: [f.lon, f.lat], zoom: 12 });
+          searchResults.hidden = true;
+          $("search-q").value = f.label;
+          setPanel(false);
+        })
+      );
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        searchResults.innerHTML = `<li class="note">La recherche ne répond pas : réessayez dans un instant.</li>`;
+        searchResults.hidden = false;
+      }
+    }
+  }, 250);
+});
+$("search").addEventListener("submit", (e) => {
+  e.preventDefault();
+  searchResults.querySelector("button")?.click();
+});
+$("search-open").addEventListener("click", () => {
+  setPanel(true);
+  $("search-q").focus();
 });

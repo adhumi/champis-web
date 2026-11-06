@@ -36,6 +36,14 @@
     #drop input { display: none; }
     #status { white-space: pre-line; margin-top: 6px; }
     #mobile-controls { display: none; }
+    /* recherche de commune (étape B3) : géocodage de l'IGN, même hôte que le fond Plan IGN */
+    #search input { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); }
+    #search-results { list-style: none; margin: 4px 0 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+    #search-results button { display: block; width: 100%; text-align: left; padding: 7px 10px; border: 0; background: transparent; cursor: pointer; }
+    #search-results button:hover, #search-results button:focus { background: var(--panel); }
+    #search-results small { color: var(--muted); }
+    #probe .trend { margin: 0 0 6px; font-weight: 600; }
+    #probe .forest { margin: 0 0 6px; font-size: .85rem; }
     @media (max-width: 719px) {
       /* plein écran : 100dvh suit la barre d'adresse d'iOS Safari ; le pied de page passe sous la carte */
       main.carte { grid-template-columns: 1fr; height: calc(100vh - var(--nav-h)); height: calc(100dvh - var(--nav-h)); }
@@ -65,8 +73,16 @@
     <aside id="panel" aria-label="Commandes de la carte">
       <div id="mobile-controls">
         <strong id="mobile-layer">Carte</strong>
-        <button id="toggle" type="button" aria-controls="panel" aria-expanded="false">Calque et légende</button>
+        <span>
+          <button id="search-open" type="button">Rechercher</button>
+          <button id="toggle" type="button" aria-controls="panel" aria-expanded="false">Calque et légende</button>
+        </span>
       </div>
+      <form id="search" role="search" autocomplete="off">
+        <label class="field" for="search-q">Aller à une commune</label>
+        <input id="search-q" type="search" placeholder="Pontarlier, Lamoura…" />
+        <ul id="search-results" hidden></ul>
+      </form>
       <div>
         <label class="field" for="layer">Couche</label>
         <select id="layer" disabled><option>Chargement des tuiles…</option></select>

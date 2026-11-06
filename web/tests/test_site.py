@@ -180,3 +180,100 @@ def test_app_line_stays_hidden_until_the_apps_are_published():
     assert call(("esc", [""]))[0] == ""
     driver = (HERE.parent / "site.js").read_text(encoding="utf-8")
     assert "const APP_LINE = null;" in driver
+
+
+def test_trend_of_a_point_names_the_best_day_ahead_or_says_stable():
+    """Étape B2 (6 nov. 2026) : sous les onze jours de la fiche, « mieux samedi 7 » quand un jour à
+    venir passe « bon » et dépasse nettement aujourd'hui, sinon « stable » ou « en baisse »."""
+    good = 0.55
+
+    def days(values):
+        return [{"iso": f"2026-11-{6 + k:02d}", "value": v} for k, v in enumerate(values, start=0)]
+
+    better, small_gain, falling, stable, no_today, no_future = call(
+        ("trend", [days([0.30, 0.40, 0.62, 0.50]), "2026-11-06", good]),
+        ("trend", [days([0.30, 0.50, 0.33]), "2026-11-06", good]),  # mieux, mais pas « bon »
+        ("trend", [days([0.60, 0.40, 0.30]), "2026-11-06", good]),
+        ("trend", [days([0.60, 0.62, 0.58]), "2026-11-06", good]),
+        ("trend", [days([None, 0.70]), "2026-11-06", good]),
+        ("trend", [days([0.40, None, None]), "2026-11-06", good]),
+    )
+    assert better == {"kind": "better", "iso": "2026-11-08"}
+    assert small_gain == {"kind": "stable"}
+    assert falling == {"kind": "falling"}
+    assert stable == {"kind": "stable"}
+    assert no_today == no_future == {"kind": "unknown"}
+    phrases = call(
+        ("trendPhrase", [better]),
+        ("trendPhrase", [stable]),
+        ("trendPhrase", [falling]),
+        ("trendPhrase", [no_today]),
+    )
+    assert phrases == ["mieux dimanche 8", "stable toute la semaine", "en baisse", None]
+
+
+def test_commune_search_uses_the_ign_geocoder():
+    """Étape B3 : recherche de commune par le géocodage de l'IGN (même hôte que le fond de carte)."""
+    url, found, empty = call(
+        ("geocodeUrl", ["Pontarlier"]),
+        (
+            "geocodeResults",
+            [
+                {
+                    "features": [
+                        {
+                            "geometry": {"type": "Point", "coordinates": [6.354, 46.904]},
+                            "properties": {"label": "Pontarlier", "context": "25, Doubs"},
+                        }
+                    ]
+                }
+            ],
+        ),
+        ("geocodeResults", [{}]),
+    )
+    assert url.startswith("https://data.geopf.fr/geocodage/search?")
+    assert "q=Pontarlier" in url and "type=municipality" in url
+    assert found == [{"label": "Pontarlier", "context": "25, Doubs", "lon": 6.354, "lat": 46.904}]
+    assert empty == []
+
+
+def test_forest_status_from_the_onf_public_forests_layer():
+    """Étape B5 : forêt domaniale, autre forêt publique, ou sans doute privée ; la requête WFS
+    porte sur un carré minuscule autour du point, en latitude puis longitude (EPSG:4326)."""
+    url, domaniale, communale, private = call(
+        ("forestUrl", [46.9, 6.35]),
+        (
+            "forestPhrase",
+            [
+                {
+                    "features": [
+                        {"properties": {"llib_frt": "Forêt domaniale du Risoux", "cdom_frt": "OUI"}}
+                    ]
+                }
+            ],
+        ),
+        (
+            "forestPhrase",
+            [
+                {
+                    "features": [
+                        {"properties": {"llib_frt": "Forêt communale de Mouthe", "cdom_frt": "NON"}}
+                    ]
+                }
+            ],
+        ),
+        ("forestPhrase", [{"features": []}]),
+    )
+    assert url.startswith("https://data.geopf.fr/wfs/ows?")
+    assert "TYPENAMES=ONF.FORETS_PUBLIQUES:ONF_FORETS_PUBLIQUES" in url
+    bbox = url.split("BBOX=")[1].split(",")
+    lat_min, lon_min, lat_max, lon_max = map(float, bbox[:4])
+    assert lat_min < 46.9 < lat_max and lon_min < 6.35 < lon_max
+    assert lat_max - lat_min < 1e-4
+    assert bbox[4] == "urn:ogc:def:crs:EPSG::4326"
+    assert (
+        domaniale
+        == "Forêt domaniale du Risoux : forêt domaniale, cueillette familiale tolérée, sauf arrêté"
+    )
+    assert communale.startswith("Forêt communale de Mouthe : forêt publique")
+    assert private.startswith("Pas une forêt publique connue")

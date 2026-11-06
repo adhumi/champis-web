@@ -39,6 +39,62 @@
     return `${SHORT_WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()}`;
   }
 
+  // ------------------------------------------------------------ tendance des onze jours (étape B2)
+  /** Même règle que la tendance d'un coin dans l'app (`CoinTrend`) : « mieux samedi 7 » si un jour à
+   *  venir atteint au moins « bon » et fait mieux qu'aujourd'hui de plus de 0,05 ; sinon « stable
+   *  toute la semaine » ou « en baisse » ; null sans météo aujourd'hui ou sans jour à venir. */
+  const TREND_TOLERANCE = 0.05;
+  function trend(days, today, goodMin) {
+    const current = days.find((d) => d.iso === today)?.value;
+    if (current === null || current === undefined) return { kind: "unknown" };
+    const future = days.filter((d) => d.iso > today && d.value !== null && d.value !== undefined);
+    if (future.length === 0) return { kind: "unknown" };
+    const best = future.reduce((a, b) => (b.value > a.value ? b : a));
+    if (best.value >= goodMin && best.value > current + TREND_TOLERANCE) return { kind: "better", iso: best.iso };
+    if (best.value < current - TREND_TOLERANCE) return { kind: "falling" };
+    return { kind: "stable" };
+  }
+  function trendPhrase(t) {
+    if (t.kind === "better") return `mieux ${weekdayName(t.iso)} ${parse(t.iso).getUTCDate()}`;
+    if (t.kind === "stable") return "stable toute la semaine";
+    if (t.kind === "falling") return "en baisse";
+    return null;
+  }
+
+  // ------------------------------------------------------------ services de l'IGN (étapes B3 et B5)
+  /* Même hôte que le fond Plan IGN (data.geopf.fr) : aucun tiers nouveau. Ce qui part : le texte
+   * tapé dans la recherche, la position du point dont on ouvre la fiche. */
+  const IGN = "https://data.geopf.fr";
+  /** Recherche de commune par le géocodage de l'IGN (sans clé). */
+  const geocodeUrl = (q) => `${IGN}/geocodage/search?${new URLSearchParams({ q, type: "municipality", limit: "5", autocomplete: "1" })}`;
+  /** Réponse du géocodage → [{ label, context, lon, lat }]. */
+  function geocodeResults(body) {
+    return (body?.features ?? []).map((f) => ({
+      label: f.properties?.label ?? f.properties?.name ?? "",
+      context: f.properties?.context ?? "",
+      lon: f.geometry.coordinates[0],
+      lat: f.geometry.coordinates[1],
+    }));
+  }
+  /** Forêts publiques de l'ONF au point (WFS de la Géoplateforme, carré de ≈ 4 m autour du point). */
+  function forestUrl(lat, lon) {
+    const d = 0.00002;
+    return (
+      `${IGN}/wfs/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature` +
+      `&TYPENAMES=ONF.FORETS_PUBLIQUES:ONF_FORETS_PUBLIQUES&OUTPUTFORMAT=application/json&COUNT=1` +
+      `&PROPERTYNAME=llib_frt,cdom_frt&BBOX=${lat - d},${lon - d},${lat + d},${lon + d},urn:ogc:def:crs:EPSG::4326`
+    );
+  }
+  /** Phrase de la fiche : forêt domaniale, autre forêt publique, ou sans doute privée. */
+  function forestPhrase(body) {
+    const p = body?.features?.[0]?.properties;
+    if (!p) return "Pas une forêt publique connue : sans doute privée, accord du propriétaire nécessaire";
+    const name = p.llib_frt || "Forêt publique";
+    return p.cdom_frt === "OUI"
+      ? `${name} : forêt domaniale, cueillette familiale tolérée, sauf arrêté`
+      : `${name} : forêt publique, cueillette familiale en général tolérée, sauf arrêté`;
+  }
+
   // ------------------------------------------------------------ heure de calcul de la météo
   /** Date (ISO) et heure à Paris d'un instant UTC : la pré-chauffe tourne en UTC, on la dit en
    *  heure française quel que soit le fuseau du navigateur. */
@@ -251,6 +307,7 @@
   const Site = {
     WEEKDAYS, SHORT_WEEKDAYS, DAY_RANGE, SUPPORT_URL, APP_LINE,
     weekdayName, shortWeekday, frenchDate, shortDate, dateFor, whenWord, parisParts, computedPhrase, todayLine,
+    trend, trendPhrase, geocodeUrl, geocodeResults, forestUrl, forestPhrase,
     hexToRgb, hexToRgba, sortedClasses, classify, accentHex, classCounts, seasonSentence,
     esc, inline, renderMarkdown, markdownTitle, apiBase, isDev,
     renderNav, applyAccent, loadPalette, renderLegend, renderDayDots,

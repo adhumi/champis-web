@@ -5,7 +5,7 @@ Quatre pages statiques, sans build (MapLibre GL et PMTiles par CDN), servies par
 | Page | Rôle |
 | --- | --- |
 | `index.html` | Redirige vers `carte.html` : le site s'ouvre sur la carte (il n'y a plus d'onglet Aujourd'hui, 5 nov. 2026). |
-| `carte.html` (Carte) | La carte à la parcelle de la phase 1, alignée sur l'app : panneau fixe à droite (360 px) sur ordinateur, plein écran sur téléphone (panneau replié en haut, fiche fixe au-dessus de la barre d'onglets). La carte montre toujours aujourd'hui : une ligne en bas à gauche le dit, avec l'heure de calcul de la météo en heure de Paris (étape A, 6 nov. 2026). Opacité de chaque classe lue dans la palette (`#RRGGBBAA`, « très faible » transparent, étape B1), fond de carte dans le panneau, fiche en clair avec ses onze jours et « Détails ». |
+| `carte.html` (Carte) | La carte à la parcelle de la phase 1, alignée sur l'app : panneau fixe à droite (360 px) sur ordinateur, plein écran sur téléphone (panneau replié en haut, fiche fixe au-dessus de la barre d'onglets). La carte montre toujours aujourd'hui : une ligne en bas à gauche le dit, avec l'heure de calcul de la météo en heure de Paris (étape A, 6 nov. 2026). Opacité de chaque classe lue dans la palette (`#RRGGBBAA`, « très faible » transparent, étape B1), fond de carte dans le panneau, fiche en clair avec ses onze jours, leur tendance (« mieux samedi 7 », « stable toute la semaine », « en baisse ») et le statut de la forêt, puis « Détails » (étape B, 6 nov. 2026). Recherche de commune en tête du panneau (« Rechercher » sur téléphone) et bouton « me localiser » de MapLibre. |
 | `comprendre.html` (Guide) | Les articles de `shared/texts/` (Markdown rendu par `Site.renderMarkdown`) et les fiches d'espèces du bloc `about` de `GET /species` (`?article=especes&espece=<id>`), en colonne de lecture de 680 px. |
 | `soutenir.html` | Page de dons sobre. Le lien de paiement est `Site.SUPPORT_URL` dans `site.js` (`null` tant qu'Adrien ne l'a pas renseigné : la page explique en attendant). |
 
@@ -14,6 +14,16 @@ Navigation : en-tête sur ordinateur (Carte, Guide, et Soutenir à droite), barr
 ## Identité (`site.css`)
 
 Fond papier clair ou sombre selon le système, accent = le vert « Bon » de la palette, posé en variable CSS par `site.js` après lecture de `shared/palette.json` ; `system-ui`, coins arrondis, aucune ombre portée. Le logo (`logo.svg`) reprend les formes de l'icône de l'app.
+
+## Services de l'IGN (étapes B3 et B5)
+
+Même hôte que le fond Plan IGN (`data.geopf.fr`, CORS ouvert, sans clé) : aucun tiers nouveau.
+
+- **Recherche de commune** : `Site.geocodeUrl(q)` (`/geocodage/search`, `type=municipality`, 5 résultats, autocomplétion), lancée 250 ms après la dernière frappe, à partir de 3 caractères ; `Site.geocodeResults` lit les résultats, un clic centre la carte au zoom 12.
+- **Statut de la forêt** : `Site.forestUrl(lat, lon)` interroge le WFS `ONF.FORETS_PUBLIQUES:ONF_FORETS_PUBLIQUES` sur un carré de ≈ 4 m autour du point cliqué (BBOX en latitude puis longitude, `urn:ogc:def:crs:EPSG::4326`) ; `Site.forestPhrase` en fait la ligne de la fiche (domaniale, autre forêt publique, ou sans doute privée). La requête part en même temps que la météo du point ; la fiche ne l'attend pas, et n'affiche rien si le service ne répond pas.
+- **Me localiser** : `maplibregl.GeolocateControl`, la position reste dans le navigateur.
+
+Ce qui part chez l'IGN est dit dans `shared/texts/confidentialite.md`.
 
 ## Lancer
 
