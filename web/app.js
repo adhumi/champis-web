@@ -484,7 +484,7 @@ $("potential").addEventListener("change", () => {
   updateTodayLine();
   fetchWeather();
 });
-// API : même origine (la page est servie par champis-api), ou `?api=` en dev statique (Site.apiBase).
+// API : api.champis.app (le site est un service à part), l'API locale en développement, ou `?api=` (Site.apiBase).
 $("api").value = Site.apiBase(location);
 $("api").addEventListener("change", fetchWeather);
 let moveTimer = null;

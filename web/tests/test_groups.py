@@ -17,8 +17,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from champis_pipeline.species import load_palette
-from champis_pipeline.tiles import NODATA, TILE, _png_rgba
+
+from pngtiles import NODATA, TILE
+from pngtiles import png_rgba as _png_rgba
+from referential import load_palette
 
 HERE = Path(__file__).parent
 DRIVER = HERE / "groups_driver.js"
@@ -115,7 +117,7 @@ def test_plan_takes_the_first_file_that_carries_a_species():
 def test_channel_order_matches_the_pipeline():
     """Glisser-déposer : l'ordre des canaux est l'ordre alphabétique des identifiants du groupe
     (`species.species_groups`), découpé par fichier de quatre."""
-    from champis_pipeline.species import group_sets, list_species, load_species
+    from referential import group_sets, list_species, load_species
 
     metas = [{"id": sid, "group": load_species(sid)["group"]} for sid in list_species()]
     shuffled = list(reversed(metas))

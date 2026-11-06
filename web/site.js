@@ -216,11 +216,16 @@
   const markdownTitle = (md) => md.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? null;
 
   // ------------------------------------------------------------ adresse de l'API et mode dev
-  /** Même origine : la page est servie par champis-api (Railway, `make serve`, quel que soit le
-   *  port). En dev statique (`python -m http.server`), `?api=http://127.0.0.1:8000` l'indique. */
+  /** Le site (champis.app) et l'API (api.champis.app) sont deux services depuis le découpage des
+   *  dépôts (6 nov. 2026). En local, l'API de `make serve` (champis-api) répond sur le port 8000 ;
+   *  `?api=…` l'indique autrement. */
+  const API_URL = "https://api.champis.app";
+  const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
   function apiBase(loc) {
     const q = new URLSearchParams(loc.search).get("api");
-    return q ? q.replace(/\/$/, "") : loc.origin;
+    if (q) return q.replace(/\/$/, "");
+    if (LOCAL_HOSTS.includes(loc.hostname)) return `${loc.protocol || "http:"}//${loc.hostname}:8000`;
+    return API_URL;
   }
   const isDev = (search) => new URLSearchParams(search).get("dev") === "1";
 
@@ -296,7 +301,7 @@
   }
 
   const Site = {
-    WEEKDAYS, SHORT_WEEKDAYS, DAY_RANGE, SUPPORT_URL, APP_LINE, CONTACT_EMAIL,
+    WEEKDAYS, SHORT_WEEKDAYS, DAY_RANGE, SUPPORT_URL, APP_LINE, CONTACT_EMAIL, API_URL,
     weekdayName, shortWeekday, frenchDate, shortDate, dateFor, whenWord, parisParts, computedPhrase, todayLine,
     trend, trendPhrase, geocodeUrl, geocodeResults, forestUrl, forestPhrase,
     hexToRgb, sortedClasses, classify, accentHex, classCounts, seasonSentence,

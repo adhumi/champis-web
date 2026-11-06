@@ -1,0 +1,4 @@
+[submodule "champis"]
+	path = champis
+	url = https://github.com/adhumi/champis.git
+	branch = main

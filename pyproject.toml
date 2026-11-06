@@ -1,0 +1,33 @@
+[project]
+name = "champis-web"
+version = "0.1.0"
+description = "Champis — le site champis.app (pages statiques ; tests en Python et node)"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "numpy>=2.0",
+    "pillow>=10.0",
+    "ruff>=0.6",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["champis"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "W", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003", "E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["referential", "pngtiles"]
+
+[tool.pytest.ini_options]
+testpaths = ["web/tests"]
+addopts = "-q"

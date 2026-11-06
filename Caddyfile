@@ -1,0 +1,52 @@
+# Site champis.app (adhumi/champis-web) : service statique Railway depuis le découpage des dépôts
+# (spec › Produit › Étape C, lot C7, 6 nov. 2026). Mêmes chemins qu'avant : /web/ pour les pages,
+# /shared/ et /species/ pour le référentiel (sous-module champis/). L'API est sur api.champis.app.
+{
+	admin off
+	auto_https off
+	# Le conteneur n'est joignable que par le proxy de Railway : son X-Forwarded-For (l'adresse du
+	# visiteur) est gardé en tête et relayé tel quel. Le limiteur de débit de l'API en lit le premier
+	# élément ; sans ce réglage, tous les visiteurs relayés auraient l'adresse du proxy.
+	servers {
+		trusted_proxies static 0.0.0.0/0 ::/0
+	}
+}
+
+:{$PORT:8080} {
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	redir / /web/ 302
+
+	# santé du service lui-même (contrôle de Railway), sans dépendre de l'API
+	handle /health {
+		respond "ok" 200
+	}
+
+	# Le site : pages, bibliothèques et référentiel. GET /species (sans barre finale) reste à l'API.
+	@site path /web /web/* /shared/* /species/*
+	handle @site {
+		root * /srv
+		encode zstd gzip
+		# bibliothèques versionnées par leur dossier : immuables ; le reste se revalide vite (matchers
+		# disjoints : deux `header` sur le même chemin, le dernier l'emporte)
+		@vendor path /web/vendor/*
+		header @vendor Cache-Control "public, max-age=31536000, immutable"
+		@revalidate not path /web/vendor/*
+		header @revalidate Cache-Control "public, max-age=300"
+		file_server
+	}
+
+	# Tout le reste part vers l'API : les versions de l'app d'avant le découpage l'appellent sur
+	# champis.app (/weather, /tiles, /observations, /coins…). Relais à retirer quand plus aucune
+	# version en service n'utilise cette adresse (spec › Étape C, lot C7). CHAMPIS_API_UPSTREAM sert
+	# à la CI (fausse API locale).
+	handle {
+		reverse_proxy {$CHAMPIS_API_UPSTREAM:https://api.champis.app} {
+			header_up Host {http.reverse_proxy.upstream.host}
+		}
+	}
+}

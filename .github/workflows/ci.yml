@@ -1,0 +1,115 @@
+# CI du site : lint et tests (Python + node, sans réseau), configuration du serveur statique.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      # Le référentiel adhumi/champis est le sous-module champis/ ; tant qu'il est privé, le jeton
+      # par défaut ne le lit pas : CHAMPIS_REFERENTIEL_TOKEN (jeton à granularité fine, lecture du
+      # contenu de adhumi/champis seulement). Une fois le dépôt public, le secret devient inutile.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Le jeton du référentiel ne voit que adhumi/champis : il ne sert qu'au sous-module, par une
+      # réécriture d'URL limitée à ce dépôt (le dépôt courant est cloné avec le jeton par défaut).
+      - name: Référentiel (sous-module champis/)
+        run: |
+          if [ -n "$REFERENTIEL_TOKEN" ]; then
+            git config --global url."https://x-access-token:${REFERENTIEL_TOKEN}@github.com/adhumi/champis.git".insteadOf "https://github.com/adhumi/champis.git"
+          fi
+          git submodule update --init --depth 1 champis
+          git -C champis log --oneline -1
+        env:
+          REFERENTIEL_TOKEN: ${{ secrets.CHAMPIS_REFERENTIEL_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv sync --group dev --locked
+
+      - name: Ruff (lint + format)
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Tests (fonctions pures en node, décodeur PNG, identifiants des pages)
+        run: uv run pytest
+
+      - name: Configuration Caddy valide
+        run: docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      # L'image que Railway fera tourner : pages et référentiel servis, santé propre au site, relais
+      # vers l'API (ici une fausse API locale : pas de réseau, pas de dépendance à la production).
+      - name: Image du site (build, chemins servis, relais vers l'API)
+        run: |
+          docker build -t champis-web .
+          python3 scripts/fake_api.py 8000 &
+          docker run -d --name site --network host -e CHAMPIS_API_UPSTREAM=http://127.0.0.1:8000 champis-web
+          for i in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:8080/health && break; sleep 1; done
+          sh scripts/smoke.sh http://localhost:8080
+          # relais : chemin et requête intacts, adresse du visiteur en tête de X-Forwarded-For
+          out=$(curl -sS -H 'X-Forwarded-For: 203.0.113.7' 'http://localhost:8080/weather?cell=42')
+          echo "$out"
+          echo "$out" | python3 -c 'import json, sys; r = json.load(sys.stdin); assert r["path"] == "/weather?cell=42", r; assert r["x_forwarded_for"].split(",")[0].strip() == "203.0.113.7", r'
+          test -z "$(curl -sS -o /dev/null -D - http://localhost:8080/weather | tr -d '\r' | grep -i '^server:')"
+          docker logs site 2>&1 | tail -n 5
+
+  # Railway ne récupère pas les sous-modules (build depuis un instantané sans .git) : la CI, qui a le
+  # référentiel, déploie elle-même avec `railway up` après des tests verts sur main, ou à la main
+  # (workflow_dispatch). RAILWAY_TOKEN : jeton de projet Railway (environnement production).
+  deploy:
+    needs: web
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-champis-web
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Le jeton du référentiel ne voit que adhumi/champis : il ne sert qu'au sous-module, par une
+      # réécriture d'URL limitée à ce dépôt (le dépôt courant est cloné avec le jeton par défaut).
+      - name: Référentiel (sous-module champis/)
+        run: |
+          if [ -n "$REFERENTIEL_TOKEN" ]; then
+            git config --global url."https://x-access-token:${REFERENTIEL_TOKEN}@github.com/adhumi/champis.git".insteadOf "https://github.com/adhumi/champis.git"
+          fi
+          git submodule update --init --depth 1 champis
+          git -C champis log --oneline -1
+        env:
+          REFERENTIEL_TOKEN: ${{ secrets.CHAMPIS_REFERENTIEL_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Railway CLI
+        run: npm install -g @railway/cli
+
+      # sans remote GitHub, la CLI envoie l'arbre de travail, sous-module compris
+      - name: Déploiement (service champis-web)
+        run: |
+          git remote remove origin
+          railway up --ci --service champis-web
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

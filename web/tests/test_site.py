@@ -12,7 +12,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from champis_pipeline.species import load_palette
+
+from referential import REFERENTIAL, load_palette
 
 HERE = Path(__file__).parent
 DRIVER = HERE / "site_driver.js"
@@ -106,7 +107,7 @@ def test_markdown_rendering_matches_the_app_rules():
 
 
 def test_shared_texts_render_without_error():
-    texts = ROOT / "shared" / "texts"
+    texts = REFERENTIAL / "shared" / "texts"
     index = json.loads((texts / "index.json").read_text(encoding="utf-8"))
     bodies = [(texts / a["file"]).read_text(encoding="utf-8") for a in index["articles"]]
     rendered = call(*[("renderMarkdown", [b]) for b in bodies])
@@ -118,18 +119,20 @@ def test_shared_texts_render_without_error():
 
 
 def test_api_base_and_dev_flag():
-    page = {"hostname": "champis.app", "port": "", "origin": "https://champis.app"}
-    local = {"hostname": "localhost", "port": "3000", "origin": "http://localhost:3000"}
-    same, override, other_port, dev, nodev = call(
+    """Découpage des dépôts (6 nov. 2026) : le site sur champis.app appelle api.champis.app ; en
+    local, l'API de `make serve` sur le port 8000 ; `?api=` l'emporte toujours."""
+    page = {"hostname": "champis.app", "protocol": "https:", "origin": "https://champis.app"}
+    local = {"hostname": "localhost", "protocol": "http:", "origin": "http://localhost:3000"}
+    prod, override, dev_api, dev, nodev = call(
         ("apiBase", [{**page, "search": ""}]),
         ("apiBase", [{**local, "search": "?api=https://x.test/"}]),
         ("apiBase", [{**local, "search": ""}]),
         ("isDev", ["?dev=1&x=2"]),
         ("isDev", ["?x=2"]),
     )
-    assert same == "https://champis.app"
+    assert prod == "https://api.champis.app"
     assert override == "https://x.test"
-    assert other_port == "http://localhost:3000"  # l'API sert la page, quel que soit le port
+    assert dev_api == "http://localhost:8000"
     assert (dev, nodev) == (True, False)
 
 
@@ -278,5 +281,5 @@ def test_contact_address_is_the_one_of_the_legal_notice():
     source = (HERE.parent / "site.js").read_text(encoding="utf-8")
     assert 'const CONTACT_EMAIL = "hello@champis.app";' in source
     assert 'href="mailto:${CONTACT_EMAIL}"' in source
-    legal = (ROOT / "shared" / "texts" / "mentions-legales.md").read_text(encoding="utf-8")
+    legal = (REFERENTIAL / "shared" / "texts" / "mentions-legales.md").read_text(encoding="utf-8")
     assert "hello@champis.app" in legal
