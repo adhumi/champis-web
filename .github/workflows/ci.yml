@@ -61,14 +61,15 @@ jobs:
       - name: Image du site (build, chemins servis, relais vers l'API)
         run: |
           docker build -t champis-web .
-          mkdir -p "$RUNNER_TEMP/api"
-          echo '{"relais":"ok"}' > "$RUNNER_TEMP/api/species"
-          echo '{"status":"api"}' > "$RUNNER_TEMP/api/health"
-          python3 -m http.server 8000 --bind 127.0.0.1 --directory "$RUNNER_TEMP/api" > /dev/null 2>&1 &
+          python3 scripts/fake_api.py 8000 &
           docker run -d --name site --network host -e CHAMPIS_API_UPSTREAM=http://127.0.0.1:8000 champis-web
           for i in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:8080/health && break; sleep 1; done
           sh scripts/smoke.sh http://localhost:8080
-          test "$(curl -sS http://localhost:8080/species)" = '{"relais":"ok"}'
+          # relais : chemin et requête intacts, adresse du visiteur en tête de X-Forwarded-For
+          out=$(curl -sS -H 'X-Forwarded-For: 203.0.113.7' 'http://localhost:8080/weather?cell=42')
+          echo "$out"
+          echo "$out" | python3 -c 'import json, sys; r = json.load(sys.stdin); assert r["path"] == "/weather?cell=42", r; assert r["x_forwarded_for"].split(",")[0].strip() == "203.0.113.7", r'
+          test -z "$(curl -sS -o /dev/null -D - http://localhost:8080/weather | tr -d '\r' | grep -i '^server:')"
           docker logs site 2>&1 | tail -n 5
 
   # Railway ne récupère pas les sous-modules (build depuis un instantané sans .git) : la CI, qui a le

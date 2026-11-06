@@ -4,6 +4,12 @@
 {
 	admin off
 	auto_https off
+	# Le conteneur n'est joignable que par le proxy de Railway : son X-Forwarded-For (l'adresse du
+	# visiteur) est gardé en tête et relayé tel quel. Le limiteur de débit de l'API en lit le premier
+	# élément ; sans ce réglage, tous les visiteurs relayés auraient l'adresse du proxy.
+	servers {
+		trusted_proxies static 0.0.0.0/0 ::/0
+	}
 }
 
 :{$PORT:8080} {
