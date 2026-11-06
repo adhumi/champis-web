@@ -17,11 +17,22 @@ jobs:
     steps:
       # Le référentiel adhumi/champis est le sous-module champis/ ; tant qu'il est privé, le jeton
       # par défaut ne le lit pas : CHAMPIS_REFERENTIEL_TOKEN (jeton à granularité fine, lecture du
-      # contenu de adhumi/champis). Une fois le dépôt public, le secret devient inutile.
+      # contenu de adhumi/champis seulement). Une fois le dépôt public, le secret devient inutile.
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
-          token: ${{ secrets.CHAMPIS_REFERENTIEL_TOKEN || github.token }}
+          persist-credentials: false
+
+      # Le jeton du référentiel ne voit que adhumi/champis : il ne sert qu'au sous-module, par une
+      # réécriture d'URL limitée à ce dépôt (le dépôt courant est cloné avec le jeton par défaut).
+      - name: Référentiel (sous-module champis/)
+        run: |
+          if [ -n "$REFERENTIEL_TOKEN" ]; then
+            git config --global url."https://x-access-token:${REFERENTIEL_TOKEN}@github.com/adhumi/champis.git".insteadOf "https://github.com/adhumi/champis.git"
+          fi
+          git submodule update --init --depth 1 champis
+          git -C champis log --oneline -1
+        env:
+          REFERENTIEL_TOKEN: ${{ secrets.CHAMPIS_REFERENTIEL_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:
@@ -58,8 +69,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
-          token: ${{ secrets.CHAMPIS_REFERENTIEL_TOKEN || github.token }}
+          persist-credentials: false
+
+      # Le jeton du référentiel ne voit que adhumi/champis : il ne sert qu'au sous-module, par une
+      # réécriture d'URL limitée à ce dépôt (le dépôt courant est cloné avec le jeton par défaut).
+      - name: Référentiel (sous-module champis/)
+        run: |
+          if [ -n "$REFERENTIEL_TOKEN" ]; then
+            git config --global url."https://x-access-token:${REFERENTIEL_TOKEN}@github.com/adhumi/champis.git".insteadOf "https://github.com/adhumi/champis.git"
+          fi
+          git submodule update --init --depth 1 champis
+          git -C champis log --oneline -1
+        env:
+          REFERENTIEL_TOKEN: ${{ secrets.CHAMPIS_REFERENTIEL_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:
