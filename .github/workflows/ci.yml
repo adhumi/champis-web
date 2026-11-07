@@ -26,8 +26,12 @@ jobs:
       # réécriture d'URL limitée à ce dépôt (le dépôt courant est cloné avec le jeton par défaut).
       - name: Référentiel (sous-module champis/)
         run: |
+          # .gitmodules pointe sur l'URL SSH (postes de dev) : la CI, sans clé SSH, la réécrit en
+          # HTTPS, avec le jeton du référentiel s'il y en a un, sinon en clair (dépôt public).
           if [ -n "$REFERENTIEL_TOKEN" ]; then
-            git config --global url."https://x-access-token:${REFERENTIEL_TOKEN}@github.com/adhumi/champis.git".insteadOf "https://github.com/adhumi/champis.git"
+            git config --global url."https://x-access-token:${REFERENTIEL_TOKEN}@github.com/adhumi/champis.git".insteadOf "git@github.com:adhumi/champis.git"
+          else
+            git config --global url."https://github.com/adhumi/champis.git".insteadOf "git@github.com:adhumi/champis.git"
           fi
           git submodule update --init --depth 1 champis
           git -C champis log --oneline -1
@@ -91,8 +95,12 @@ jobs:
       # réécriture d'URL limitée à ce dépôt (le dépôt courant est cloné avec le jeton par défaut).
       - name: Référentiel (sous-module champis/)
         run: |
+          # .gitmodules pointe sur l'URL SSH (postes de dev) : la CI, sans clé SSH, la réécrit en
+          # HTTPS, avec le jeton du référentiel s'il y en a un, sinon en clair (dépôt public).
           if [ -n "$REFERENTIEL_TOKEN" ]; then
-            git config --global url."https://x-access-token:${REFERENTIEL_TOKEN}@github.com/adhumi/champis.git".insteadOf "https://github.com/adhumi/champis.git"
+            git config --global url."https://x-access-token:${REFERENTIEL_TOKEN}@github.com/adhumi/champis.git".insteadOf "git@github.com:adhumi/champis.git"
+          else
+            git config --global url."https://github.com/adhumi/champis.git".insteadOf "git@github.com:adhumi/champis.git"
           fi
           git submodule update --init --depth 1 champis
           git -C champis log --oneline -1
