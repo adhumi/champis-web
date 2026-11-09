@@ -17,6 +17,32 @@
   /** Adresse de contact de l'éditeur (mentions légales, confidentialité, pied de page). */
   const CONTACT_EMAIL = "hello@champis.app";
 
+  // ------------------------------------------------------------ sélecteur d'espèce de la carte
+  /** Entrées du sélecteur d'espèce (9 nov. 2026) depuis les espèces chargées ({ id, names: { fr,
+   *  la }, group: { id, fr } | null }) : les groupes d'abord, dans l'ordre où ils apparaissent, puis
+   *  les espèces par nom français. Chaque entrée : `value` (« g:<groupe> » ou « s:<id> »), `fr`,
+   *  `la` (nom latin ; pour un groupe, ses genres), `spp` (vrai pour un groupe : « Boletus spp. »)
+   *  et `illustration`, l'identifiant de l'espèce dont la planche sert de miniature (pour un groupe,
+   *  l'espèce au nom français le plus court, à égalité le premier dans l'ordre alphabétique). */
+  function layerItems(list) {
+    const byGroup = new Map();
+    for (const s of list) {
+      if (!s.group) continue;
+      if (!byGroup.has(s.group.id)) byGroup.set(s.group.id, { fr: s.group.fr, members: [] });
+      byGroup.get(s.group.id).members.push(s);
+    }
+    const items = [];
+    for (const [gid, g] of byGroup) {
+      const genera = [...new Set(g.members.map((s) => (s.names.la || "").split(" ")[0]).filter(Boolean))].sort();
+      const lead = [...g.members].sort((a, b) => a.names.fr.length - b.names.fr.length || a.names.fr.localeCompare(b.names.fr, "fr"))[0];
+      items.push({ value: `g:${gid}`, fr: g.fr, la: genera.join(", "), spp: true, illustration: lead.id });
+    }
+    for (const s of [...list].sort((a, b) => a.names.fr.localeCompare(b.names.fr, "fr"))) {
+      items.push({ value: `s:${s.id}`, fr: s.names.fr, la: s.names.la || "", spp: false, illustration: s.id });
+    }
+    return items;
+  }
+
   // ------------------------------------------------------------ dates (UTC midi : jamais de décalage)
   const parse = (iso) => new Date(iso + "T12:00:00Z");
   const weekdayName = (iso) => WEEKDAYS[parse(iso).getUTCDay()];
@@ -247,14 +273,19 @@
     { href: "comprendre.html", title: "Guide", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm4 4h8M8 13h8" },
     { href: "soutenir.html", title: "Soutenir", support: true, icon: "M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z" },
   ];
+  /** En-tête : logo, pages, puis Soutenir à droite. Les outils d'une page (`.nav-tools` déjà dans
+   *  l'en-tête : sélecteur d'espèce et recherche de la carte, 9 nov. 2026) sont gardés, entre les
+   *  pages et Soutenir. */
   function renderNav(active) {
     if (typeof document === "undefined") return;
     const header = document.getElementById("site-header");
     if (header) {
+      const tools = header.querySelector(".nav-tools");
       header.innerHTML =
-        `<a class="brand" href="index.html"><img src="logo.svg" alt="" width="32" height="32" /> Champis</a>` +
+        `<a class="brand" href="index.html"><img src="logo.svg" alt="" width="32" height="32" /> <span class="brand-name">Champis</span></a>` +
         `<nav aria-label="Pages">${PAGES.filter((p) => !p.support).map((p) => `<a href="${p.href}"${p.href === active ? ' aria-current="page"' : ""}>${p.title}</a>`).join("")}</nav>` +
-        `<span class="spacer"></span><a class="support" href="soutenir.html">Soutenir</a>`;
+        `<span class="spacer"></span><a class="support" href="soutenir.html" aria-label="Soutenir"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${PAGES[2].icon}"/></svg><span class="support-label">Soutenir</span></a>`;
+      if (tools) header.insertBefore(tools, header.querySelector(".spacer"));
     }
     const tabs = document.getElementById("site-tabs");
     if (tabs) {
@@ -338,7 +369,7 @@
     trend, trendPhrase, geocodeUrl, geocodeResults, forestUrl, forestPhrase,
     hexToRgb, sortedClasses, classify, pixelColor, accentHex, classCounts, seasonSentence,
     esc, inline, renderMarkdown, markdownTitle, apiBase, isDev,
-    renderNav, applyAccent, loadPalette, renderLegend, renderDayDots,
+    layerItems, renderNav, applyAccent, loadPalette, renderLegend, renderDayDots,
   };
   root.Site = Site;
   if (typeof module !== "undefined" && module.exports) module.exports = Site;

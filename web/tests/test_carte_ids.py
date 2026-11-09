@@ -88,3 +88,27 @@ def test_home_page_carries_the_promise_and_keeps_old_map_links():
     assert 'location.replace("carte.html" + location.search + location.hash)' in html
     for article in ("cueillir-sans-nuire", "donnees-et-sources", "confidentialite"):
         assert f"comprendre.html?article={article}" in html
+
+
+def test_map_bar_carries_picker_and_search_and_the_map_carries_the_basemap():
+    """Carte du 9 nov. 2026 : la recherche et le sélecteur d'espèce (liste illustrée, plus de
+    `<select>`) sont dans la barre de navigation flottante ; le fond de carte est un bouton des
+    commandes de la carte, sous « me localiser » ; le potentiel toute saison n'est plus proposé."""
+    html = (WEB / "carte.html").read_text(encoding="utf-8")
+    app = (WEB / "app.js").read_text(encoding="utf-8")
+    header = html[html.index('<header id="site-header"') : html.index("</header>")]
+    for needed in (
+        'class="nav-tools"',
+        'id="layer"',
+        'role="listbox"',
+        'id="search"',
+        'id="search-open"',
+    ):
+        assert needed in header, needed
+    assert "<select" not in html
+    for gone in ('id="potential"', 'id="basemap"', "toute saison", 'id="mobile-controls"'):
+        assert gone not in html, gone
+    assert "mode()" not in app and '$("potential")' not in app
+    geolocate = app.index("new maplibregl.GeolocateControl")
+    assert geolocate < app.index("new BasemapControl()") < app.index("new LegendControl()")
+    assert "shared/illustrations/" in app and "Site.layerItems" in app
