@@ -9,106 +9,222 @@
   <link rel="stylesheet" href="site.css" />
   <link rel="stylesheet" href="vendor/maplibre-gl-4.7.1/maplibre-gl.css" />
   <style>
-    main.carte { display: grid; grid-template-columns: minmax(0, 1fr) 360px; height: calc(100vh - 53px); }
+    /* Carte plein écran ; la barre de navigation flotte au-dessus, sur ordinateur comme sur téléphone
+       (9 nov. 2026) : logo, pages, sélecteur d'espèce, recherche, Soutenir. Panneau fixe à droite
+       sur ordinateur (légende, fiche) ; étude des largeurs dans ETUDE-barre-carte-2026-11-09.md. */
+    :root { --bar-gap: 12px; --bar-h: 52px; --panel-w: 360px; }
+    main.carte { display: grid; grid-template-columns: minmax(0, 1fr) var(--panel-w); height: 100vh; height: 100dvh; }
     #map-col { position: relative; display: flex; flex-direction: column; min-width: 0; }
     #map { flex: 1; position: relative; }
     /* la carte montre toujours aujourd'hui (étape A, 6 nov. 2026) : une ligne le dit, avec l'heure de
        calcul de la météo, en bas à gauche, sur ordinateur comme sur téléphone */
     #today-line { position: absolute; z-index: 4; left: 12px; bottom: 12px; max-width: calc(100% - 140px); padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--fg); font-size: .8rem; }
     #today-line:empty { display: none; }
-    #panel { border-left: 1px solid var(--border); background: var(--panel); padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+    #panel { border-left: 1px solid var(--border); background: var(--panel); overflow: auto; }
+    #panel-sheet { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
     #panel label.field { display: block; font-size: .8rem; color: var(--muted); margin-bottom: 2px; }
-    #panel select { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); }
-    .check { display: flex; align-items: center; gap: 8px; font-size: .9rem; }
     .note { font-size: .8rem; color: var(--muted); }
     #weather-status { font-size: .8rem; color: var(--muted); }
-    #probe { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; background: var(--bg); display: none; }
+    #weather-status:empty { display: none; }
+    #probe { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; background: var(--bg); display: none; margin: 14px 16px 0; }
     #probe h2 { font-size: 1.05rem; margin: 0 0 2px; display: flex; align-items: center; gap: 8px; }
     #probe .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--border); }
     #probe .sub { color: var(--muted); font-size: .85rem; margin-bottom: 6px; }
     #probe ul { margin: 0 0 6px; padding-left: 18px; }
     #probe details { font-size: .8rem; color: var(--muted); }
     #probe details div { font-family: ui-monospace, monospace; white-space: pre-line; margin-top: 4px; }
+    #probe .trend { margin: 0 0 6px; font-weight: 600; }
+    #probe .forest { margin: 0 0 6px; font-size: .85rem; }
     #dev { border-top: 1px dashed var(--border); padding-top: 10px; font-size: .8rem; color: var(--muted); }
     #dev input[type=text] { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); }
     #drop { margin-top: 8px; padding: 12px 8px; border: 2px dashed var(--border); border-radius: 8px; text-align: center; cursor: pointer; }
     #drop.over { border-color: var(--accent); color: var(--fg); }
     #drop input { display: none; }
     #status { white-space: pre-line; margin-top: 6px; }
-    #mobile-controls { display: none; }
-    /* recherche de commune (étape B3) : géocodage de l'IGN, même hôte que le fond Plan IGN */
-    #search input { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); }
-    #search-results { list-style: none; margin: 4px 0 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
-    #search-results button { display: block; width: 100%; text-align: left; padding: 7px 10px; border: 0; background: transparent; cursor: pointer; }
-    #search-results button:hover, #search-results button:focus { background: var(--panel); }
+
+    /* ---- barre flottante */
+    #site-header.map-bar {
+      position: fixed; z-index: 20; top: var(--bar-gap); left: var(--bar-gap); right: calc(var(--panel-w) + var(--bar-gap));
+      height: var(--bar-h); padding: 0 8px 0 12px; gap: 10px; border: 1px solid var(--border); border-radius: 14px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, .12);
+    }
+    #site-header.map-bar nav { margin-left: 0; }
+    #site-header.map-bar nav a { padding: 6px 10px; }
+    #site-header.map-bar .support { flex: none; padding: 6px 8px; white-space: nowrap; }
+    #site-header.map-bar .spacer { flex: 1 1 0; min-width: 0; }
+    .nav-tools { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 auto; }
+    .icon-button {
+      display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; flex: none;
+      border: 0; border-radius: 10px; background: transparent; color: var(--fg); cursor: pointer;
+    }
+    .icon-button:hover { background: var(--bg); }
+    .icon-button svg, .search-field > svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    :is(.icon-button, .picker-button, .picker-list li, .basemap-menu button, #search-results button):focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+    /* ---- sélecteur d'espèce : miniature, nom français, nom latin atténué */
+    .picker { position: relative; min-width: 0; flex: 0 1 auto; }
+    .picker-button {
+      display: flex; align-items: center; gap: 8px; width: 100%; min-width: 120px; max-width: 280px; height: 40px; padding: 2px 8px 2px 3px;
+      border: 1px solid var(--border); border-radius: 10px; background: var(--bg); cursor: pointer; text-align: left;
+    }
+    .picker-button:hover:not(:disabled) { border-color: var(--muted); }
+    .picker-button:disabled { cursor: default; color: var(--muted); }
+    .picker-button[aria-expanded="true"] { border-color: var(--accent); }
+    .thumb { width: 34px; height: 34px; flex: none; border-radius: 7px; object-fit: cover; background: #fff; border: 1px solid var(--border); }
+    .picker-list .thumb { width: 44px; height: 44px; border-radius: 9px; }
+    .names { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.2; }
+    .names .fr { font-weight: 600; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .names .la { font-size: .78rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .names .la i { font-style: italic; }
+    .picker-button .chevron { width: 16px; height: 16px; flex: none; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .picker-list {
+      position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; width: 320px; max-height: min(70vh, 560px); overflow: auto;
+      margin: 0; padding: 6px; list-style: none; border: 1px solid var(--border); border-radius: 14px; background: var(--panel);
+      box-shadow: 0 6px 24px rgba(0, 0, 0, .16);
+    }
+    .picker-list:focus { outline: none; }
+    .picker-list li { display: flex; align-items: center; gap: 12px; padding: 6px 10px 6px 6px; border-radius: 10px; cursor: pointer; }
+    .picker-list li .names .fr, .picker-list li .names .la { white-space: normal; }
+    .picker-list li:hover, .picker-list li.active { background: var(--bg); }
+    .picker-list li[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+    .picker-list li[aria-selected="true"]:hover, .picker-list li[aria-selected="true"].active { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+    .picker-list li .check { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; visibility: hidden; }
+    .picker-list li[aria-selected="true"] .check { visibility: visible; }
+    .picker-list li.sep { height: 1px; padding: 0; margin: 4px 6px; background: var(--border); cursor: default; }
+
+    /* ---- recherche de commune (étape B3) : géocodage de l'IGN, même hôte que le fond Plan IGN.
+       Champ visible dans la barre quand la place le permet, sinon une loupe qui le déplie par-dessus
+       toute la barre. */
+    #search { display: flex; align-items: center; flex: none; }
+    .search-field { position: relative; display: flex; align-items: center; gap: 6px; width: 240px; height: 40px; padding: 0 6px 0 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--muted); }
+    .search-field:focus-within { border-color: var(--accent); }
+    .search-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; padding: 0; color: var(--fg); }
+    .search-field input::-webkit-search-cancel-button { display: none; }
+    #search-open, #search-close { display: none; }
+    #search-results {
+      position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; right: 0; min-width: 260px; list-style: none; margin: 0; padding: 6px;
+      border: 1px solid var(--border); border-radius: 14px; background: var(--panel); box-shadow: 0 6px 24px rgba(0, 0, 0, .16); color: var(--fg);
+    }
+    #search-results li.note { padding: 7px 10px; }
+    #search-results button { display: block; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; cursor: pointer; }
+    #search-results button:hover, #search-results button:focus { background: var(--bg); }
     #search-results small { color: var(--muted); }
-    #probe .trend { margin: 0 0 6px; font-weight: 600; }
-    #probe .forest { margin: 0 0 6px; font-size: .85rem; }
+    @media (max-width: 1279px) {
+      #search-open { display: inline-flex; }
+      .search-field { display: none; }
+      #site-header.map-bar.searching .search-field {
+        display: flex; position: absolute; z-index: 25; inset: 5px; width: auto; height: auto;
+      }
+      #site-header.map-bar.searching #search-close { display: inline-flex; width: 32px; height: 32px; }
+    }
+
+    /* ---- commandes de la carte : sous la barre ; fond de carte sous « me localiser » */
+    .maplibregl-ctrl-top-right { top: calc(var(--bar-gap) + var(--bar-h) + 4px); }
+    .basemap-ctrl { position: relative; }
+    .basemap-ctrl > button svg, .legend-ctrl > button svg { width: 18px; height: 18px; fill: none; stroke: #333; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .basemap-ctrl > button, .legend-ctrl > button { display: flex !important; align-items: center; justify-content: center; }
+    .basemap-menu {
+      position: absolute; top: 0; right: calc(100% + 8px); min-width: 210px; margin: 0; padding: 6px; list-style: none;
+      border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--fg); box-shadow: 0 6px 24px rgba(0, 0, 0, .16);
+      font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    .maplibregl-ctrl-group .basemap-menu button {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; height: auto; padding: 7px 10px;
+      border: 0; border-radius: 8px; background: transparent; color: inherit; text-align: left; cursor: pointer; font: inherit;
+    }
+    .maplibregl-ctrl-group .basemap-menu button:hover { background: var(--bg); }
+    .basemap-menu button[aria-checked="true"] { font-weight: 600; background: color-mix(in srgb, var(--accent) 14%, transparent); }
+    .basemap-menu button svg { width: 16px; height: 16px; fill: none; stroke: var(--accent); stroke-width: 2.5; visibility: hidden; }
+    .basemap-menu button[aria-checked="true"] svg { visibility: visible; }
+    .legend-ctrl { display: none; }
+
+    @media (max-width: 819px) {
+      :root { --panel-w: 280px; }
+    }
+    @media (max-width: 1099px) {
+      :root { --panel-w: 300px; }
+      #site-header.map-bar { gap: 4px; padding-left: 8px; }
+      #site-header.map-bar .brand-name, #site-header.map-bar .support-label { display: none; }
+      #site-header.map-bar .support { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 0; }
+      #site-header.map-bar .support svg { display: block; }
+      #site-header.map-bar nav a { padding: 6px 8px; }
+    }
     @media (max-width: 719px) {
       /* plein écran : 100dvh suit la barre d'adresse d'iOS Safari ; le pied de page passe sous la carte */
+      :root { --bar-gap: 8px; --bar-h: 50px; }
       main.carte { grid-template-columns: 1fr; height: calc(100vh - var(--nav-h)); height: calc(100dvh - var(--nav-h)); }
       footer.site-footer { display: none; }
       #map-col { height: 100%; }
-      #panel { position: absolute; z-index: 5; top: 8px; left: 8px; right: 8px; border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; gap: 8px; max-height: 60%; }
-      #panel.collapsed > :not(#mobile-controls) { display: none; }
-      #mobile-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-      #mobile-controls button { border: 0; background: transparent; color: var(--accent); font-weight: 600; padding: 4px 6px; cursor: pointer; }
-      /* la fiche sort du panneau replié (qui la coupait, défaut relevé le 6 nov. 2026) : fixe, au-dessus
-         de la barre d'onglets */
-      #probe { position: fixed; z-index: 6; left: 8px; right: 8px; bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom)); max-height: 55vh; overflow: auto; background: var(--panel); box-shadow: 0 2px 12px rgba(0, 0, 0, .2); }
+      /* barre : le sélecteur et la loupe seulement (les pages sont dans la barre d'onglets) ; la
+         recherche dépliée prend toute la largeur, par-dessus le sélecteur */
+      #site-header.map-bar { right: var(--bar-gap); padding: 0 4px 0 5px; }
+      #site-header.map-bar :is(.brand, .spacer, .support) { display: none; }
+      .nav-tools { flex: 1; }
+      .picker { flex: 1; position: static; }
+      .picker-button { width: 100%; min-width: 0; max-width: none; border-color: transparent; background: transparent; }
+      .picker-list { left: 0; right: 0; width: auto; max-height: calc(100dvh - var(--nav-h) - 90px); }
+      #search { margin-left: auto; }
+      /* légende et état de la météo : un panneau qui s'ouvre au bouton « Légende » des commandes */
+      #panel { display: contents; }
+      #panel-sheet {
+        display: none; position: fixed; z-index: 6; left: 8px; right: 8px; bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom));
+        max-height: 55vh; overflow: auto; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel);
+        box-shadow: 0 2px 12px rgba(0, 0, 0, .2);
+      }
+      #panel.open #panel-sheet { display: flex; }
+      .legend-ctrl { display: block; }
+      /* la fiche : fixe, au-dessus de la barre d'onglets (défaut relevé le 6 nov. 2026) */
+      #probe { position: fixed; z-index: 6; margin: 0; left: 8px; right: 8px; bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom)); max-height: 55vh; overflow: auto; background: var(--panel); box-shadow: 0 2px 12px rgba(0, 0, 0, .2); }
       #today-line { left: 8px; bottom: 8px; }
-      /* commandes de zoom sous le panneau replié, plus dessous */
-      .maplibregl-ctrl-top-right { top: 64px; }
-      #site-header { display: none; }
     }
   </style>
 </head>
 <body>
-  <header id="site-header"></header>
+  <header id="site-header" class="map-bar">
+    <div class="nav-tools">
+      <div class="picker" id="picker">
+        <button id="layer" class="picker-button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="layer-list" aria-label="Espèce affichée" disabled>
+          <img id="layer-thumb" class="thumb" alt="" hidden />
+          <span class="names"><span class="fr" id="layer-fr">Chargement des cartes…</span><span class="la" id="layer-la"></span></span>
+          <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+        </button>
+        <ul id="layer-list" class="picker-list" role="listbox" tabindex="-1" aria-label="Espèces et groupes" hidden></ul>
+      </div>
+      <form id="search" role="search" autocomplete="off">
+        <button id="search-open" class="icon-button" type="button" aria-label="Rechercher une commune" aria-expanded="false" aria-controls="search-q">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+        </button>
+        <div class="search-field">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+          <input id="search-q" type="search" placeholder="Aller à une commune…" aria-label="Aller à une commune" />
+          <button id="search-close" class="icon-button" type="button" aria-label="Fermer la recherche">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          </button>
+          <ul id="search-results" hidden></ul>
+        </div>
+      </form>
+    </div>
+  </header>
   <main class="carte">
     <div id="map-col">
       <div id="map" role="application" aria-label="Carte des champignons"></div>
       <div id="today-line" aria-live="polite"></div>
     </div>
-    <aside id="panel" aria-label="Commandes de la carte">
-      <div id="mobile-controls">
-        <strong id="mobile-layer">Carte</strong>
-        <span>
-          <button id="search-open" type="button">Rechercher</button>
-          <button id="toggle" type="button" aria-controls="panel" aria-expanded="false">Calque et légende</button>
-        </span>
-      </div>
-      <form id="search" role="search" autocomplete="off">
-        <label class="field" for="search-q">Aller à une commune</label>
-        <input id="search-q" type="search" placeholder="Pontarlier, Lamoura…" />
-        <ul id="search-results" hidden></ul>
-      </form>
-      <div>
-        <label class="field" for="layer">Couche</label>
-        <select id="layer" disabled><option>Chargement des tuiles…</option></select>
-      </div>
-      <label class="check"><input id="potential" type="checkbox" /> Afficher le potentiel toute saison</label>
-      <div id="potential-note" class="note" hidden>Le terrain seul, sans la météo ni la saison : pour repérer des secteurs.</div>
-      <div>
-        <label class="field" for="basemap">Fond de carte</label>
-        <select id="basemap">
-          <option value="plan">Plan IGN</option>
-          <option value="ortho">Photo aérienne IGN</option>
-          <option value="osm">OpenStreetMap</option>
-        </select>
-      </div>
-      <div id="weather-status" aria-live="polite"></div>
+    <aside id="panel" aria-label="Légende et fiche du point">
       <div id="probe" aria-live="polite"></div>
-      <div id="legend"></div>
-      <p class="app-line" id="app-line"></p>
-      <div id="dev" hidden>
-        <label class="field" for="api">Adresse de l'API</label>
-        <input id="api" type="text" />
-        <div id="drop">
-          Glisser ici des <code>T-*.pmtiles</code> ou <code>G-*.pmtiles</code> et le <code>A-*.pmtiles</code><br />(ou cliquer pour choisir)
-          <input id="files" type="file" accept=".pmtiles" multiple />
+      <div id="panel-sheet">
+        <div id="weather-status" aria-live="polite"></div>
+        <div id="legend"></div>
+        <p class="app-line" id="app-line"></p>
+        <div id="dev" hidden>
+          <label class="field" for="api">Adresse de l'API</label>
+          <input id="api" type="text" />
+          <div id="drop">
+            Glisser ici des <code>T-*.pmtiles</code> ou <code>G-*.pmtiles</code> et le <code>A-*.pmtiles</code><br />(ou cliquer pour choisir)
+            <input id="files" type="file" accept=".pmtiles" multiple />
+          </div>
+          <div id="status"></div>
         </div>
-        <div id="status"></div>
       </div>
     </aside>
   </main>
