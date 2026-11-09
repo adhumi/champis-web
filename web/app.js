@@ -98,14 +98,15 @@ if (Site.APP_LINE) $("app-line").textContent = Site.APP_LINE;
 else $("app-line").remove();
 $("dev").hidden = !DEV;
 
-// Sur téléphone, la légende et l'état de la météo sont dans un panneau qui s'ouvre au bouton
-// « Légende » des commandes de la carte ; sur ordinateur le panneau est fixe à droite et la classe
-// n'a aucun effet.
+// La légende et l'état de la météo sont dans un panneau qui s'ouvre au bouton « Légende » des
+// commandes de la carte, sur ordinateur comme sur téléphone (plus de barre latérale, 9 nov. 2026).
+// Sur téléphone, la fiche et le panneau se partagent le bas de l'écran : l'un ferme l'autre.
 let legendButton = null;
+const NARROW = matchMedia("(max-width: 719px)");
 function setPanel(open) {
   $("panel").classList.toggle("open", open);
   legendButton?.setAttribute("aria-expanded", String(open));
-  if (open) probe.style.display = "none"; // la fiche et le panneau se partagent le bas de l'écran
+  if (open && NARROW.matches) probe.style.display = "none";
 }
 
 // ---------------------------------------------------------------- palette
@@ -478,7 +479,7 @@ class BasemapControl {
 }
 map.addControl(new BasemapControl(), "top-right");
 
-/** Légende sur téléphone : le panneau s'ouvre au bouton, sous le fond de carte (caché sur ordinateur). */
+/** Légende : le panneau s'ouvre au bouton, sous le fond de carte. */
 class LegendControl {
   onAdd() {
     const box = document.createElement("div");
@@ -1050,6 +1051,7 @@ map.on("click", async (e) => {
   const arrays = await speciesT(currentKey, z, tx, ty);
   const altIdx = (await altTile(z, tx, ty))?.[i] ?? null;
   probe.style.display = "block";
+  if (NARROW.matches) setPanel(false);
   // meilleure espèce du groupe au point cliqué (S = T × M_eff × Φ)
   let best = null;
   for (const { sid, t } of arrays) {

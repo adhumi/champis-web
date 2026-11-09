@@ -10,23 +10,35 @@
   <link rel="stylesheet" href="vendor/maplibre-gl-4.7.1/maplibre-gl.css" />
   <style>
     /* Carte plein écran ; la barre de navigation flotte au-dessus, sur ordinateur comme sur téléphone
-       (9 nov. 2026) : logo, pages, sélecteur d'espèce, recherche, Soutenir. Panneau fixe à droite
-       sur ordinateur (légende, fiche) ; étude des largeurs dans ETUDE-barre-carte-2026-11-09.md. */
-    :root { --bar-gap: 12px; --bar-h: 52px; --panel-w: 360px; }
-    main.carte { display: grid; grid-template-columns: minmax(0, 1fr) var(--panel-w); height: 100vh; height: 100dvh; }
+       (9 nov. 2026) : logo, pages, sélecteur d'espèce, recherche, Soutenir (masqué pour l'instant).
+       Pas de barre latérale : légende au bouton, fiche flottante ; étude des largeurs dans
+       ETUDE-barre-carte-2026-11-09.md. */
+    :root { --bar-gap: 12px; --bar-h: 52px; }
+    main.carte { display: grid; grid-template-columns: minmax(0, 1fr); height: 100vh; height: 100dvh; }
     #map-col { position: relative; display: flex; flex-direction: column; min-width: 0; }
     #map { flex: 1; position: relative; }
     /* la carte montre toujours aujourd'hui (étape A, 6 nov. 2026) : une ligne le dit, avec l'heure de
        calcul de la météo, en bas à gauche, sur ordinateur comme sur téléphone */
     #today-line { position: absolute; z-index: 4; left: 12px; bottom: 12px; max-width: calc(100% - 140px); padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--fg); font-size: .8rem; }
     #today-line:empty { display: none; }
-    #panel { border-left: 1px solid var(--border); background: var(--panel); overflow: auto; }
-    #panel-sheet { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+    /* Plus de barre latérale (9 nov. 2026) : la légende s'ouvre au bouton des commandes de la carte,
+       sous le fond de carte, comme sur téléphone ; la fiche d'un point flotte à gauche, sous la barre. */
+    #panel { display: contents; }
+    #panel-sheet {
+      display: none; position: fixed; z-index: 15; top: calc(var(--bar-gap) + var(--bar-h) + 10px); right: 56px; width: 360px;
+      max-height: calc(100vh - var(--bar-h) - 80px); overflow: auto; padding: 14px 16px; flex-direction: column; gap: 12px;
+      border: 1px solid var(--border); border-radius: 14px; background: var(--panel); box-shadow: 0 6px 24px rgba(0, 0, 0, .16);
+    }
+    #panel.open #panel-sheet { display: flex; }
     #panel label.field { display: block; font-size: .8rem; color: var(--muted); margin-bottom: 2px; }
     .note { font-size: .8rem; color: var(--muted); }
     #weather-status { font-size: .8rem; color: var(--muted); }
     #weather-status:empty { display: none; }
-    #probe { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; background: var(--bg); display: none; margin: 14px 16px 0; }
+    #probe {
+      display: none; position: fixed; z-index: 15; top: calc(var(--bar-gap) + var(--bar-h) + 10px); left: var(--bar-gap); width: 360px;
+      max-height: calc(100vh - var(--bar-h) - 80px); overflow: auto; padding: 12px 14px;
+      border: 1px solid var(--border); border-radius: 14px; background: var(--panel); box-shadow: 0 6px 24px rgba(0, 0, 0, .16);
+    }
     #probe h2 { font-size: 1.05rem; margin: 0 0 2px; display: flex; align-items: center; gap: 8px; }
     #probe .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--border); }
     #probe .sub { color: var(--muted); font-size: .85rem; margin-bottom: 6px; }
@@ -44,7 +56,7 @@
 
     /* ---- barre flottante */
     #site-header.map-bar {
-      position: fixed; z-index: 20; top: var(--bar-gap); left: var(--bar-gap); right: calc(var(--panel-w) + var(--bar-gap));
+      position: fixed; z-index: 20; top: var(--bar-gap); left: var(--bar-gap); right: var(--bar-gap);
       height: var(--bar-h); padding: 0 8px 0 12px; gap: 10px; border: 1px solid var(--border); border-radius: 14px;
       box-shadow: 0 2px 10px rgba(0, 0, 0, .12);
     }
@@ -109,7 +121,7 @@
     #search-results button { display: block; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; cursor: pointer; }
     #search-results button:hover, #search-results button:focus { background: var(--bg); }
     #search-results small { color: var(--muted); }
-    @media (max-width: 1279px) {
+    @media (max-width: 899px) {
       #search-open { display: inline-flex; }
       .search-field { display: none; }
       #site-header.map-bar.searching .search-field {
@@ -136,19 +148,7 @@
     .basemap-menu button[aria-checked="true"] { font-weight: 600; background: color-mix(in srgb, var(--accent) 14%, transparent); }
     .basemap-menu button svg { width: 16px; height: 16px; fill: none; stroke: var(--accent); stroke-width: 2.5; visibility: hidden; }
     .basemap-menu button[aria-checked="true"] svg { visibility: visible; }
-    .legend-ctrl { display: none; }
 
-    @media (max-width: 819px) {
-      :root { --panel-w: 280px; }
-    }
-    @media (max-width: 1099px) {
-      :root { --panel-w: 300px; }
-      #site-header.map-bar { gap: 4px; padding-left: 8px; }
-      #site-header.map-bar .brand-name, #site-header.map-bar .support-label { display: none; }
-      #site-header.map-bar .support { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 0; }
-      #site-header.map-bar .support svg { display: block; }
-      #site-header.map-bar nav a { padding: 6px 8px; }
-    }
     @media (max-width: 719px) {
       /* plein écran : 100dvh suit la barre d'adresse d'iOS Safari ; le pied de page passe sous la carte */
       :root { --bar-gap: 8px; --bar-h: 50px; }
@@ -165,16 +165,12 @@
       .picker-list { left: 0; right: 0; width: auto; max-height: calc(100dvh - var(--nav-h) - 90px); }
       #search { margin-left: auto; }
       /* légende et état de la météo : un panneau qui s'ouvre au bouton « Légende » des commandes */
-      #panel { display: contents; }
       #panel-sheet {
-        display: none; position: fixed; z-index: 6; left: 8px; right: 8px; bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom));
-        max-height: 55vh; overflow: auto; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel);
-        box-shadow: 0 2px 12px rgba(0, 0, 0, .2);
+        top: auto; left: 8px; right: 8px; width: auto; bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom));
+        max-height: 55vh; padding: 12px 14px; border-radius: var(--radius); box-shadow: 0 2px 12px rgba(0, 0, 0, .2);
       }
-      #panel.open #panel-sheet { display: flex; }
-      .legend-ctrl { display: block; }
       /* la fiche : fixe, au-dessus de la barre d'onglets (défaut relevé le 6 nov. 2026) */
-      #probe { position: fixed; z-index: 6; margin: 0; left: 8px; right: 8px; bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom)); max-height: 55vh; overflow: auto; background: var(--panel); box-shadow: 0 2px 12px rgba(0, 0, 0, .2); }
+      #probe { top: auto; left: 8px; right: 8px; width: auto; bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom)); max-height: 55vh; border-radius: var(--radius); box-shadow: 0 2px 12px rgba(0, 0, 0, .2); }
       #today-line { left: 8px; bottom: 8px; }
     }
   </style>

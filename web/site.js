@@ -11,6 +11,10 @@
   const DAY_RANGE = [-3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7];
   /* Lien de don (RevenueCat Web Billing), à renseigner par Adrien ; null = la page explique en attendant. */
   const SUPPORT_URL = null;
+  /* Partie « Soutenir » montrée ou non (masquée le 9 nov. 2026 jusqu'à ce qu'Adrien la réactive) :
+   * en-tête, barre d'onglets, pied de page et liens marqués `data-support` dans les pages. La page
+   * soutenir.html reste servie, sans lien qui y mène. Remettre `true` suffit à tout réafficher. */
+  const SUPPORT_VISIBLE = false;
   /* Ligne qui renvoie vers l'app, sous la carte et les fiches : null tant que l'app n'est pas publiée
    * (étape A, 6 nov. 2026 : pas de promesse sans lien), le texte à remettre à la publication. */
   const APP_LINE = null;
@@ -266,8 +270,8 @@
   const isDev = (search) => new URLSearchParams(search).get("dev") === "1";
 
   // ------------------------------------------------------------ navigateur seulement
-  /* Barre du téléphone : trois entrées (étape A, 6 nov. 2026). Sur ordinateur, Soutenir reste à
-   * droite de l'en-tête, hors de la navigation. */
+  /* Barre du téléphone : trois entrées (étape A, 6 nov. 2026), deux tant que Soutenir est masqué.
+   * Sur ordinateur, Soutenir est à droite de l'en-tête, hors de la navigation. */
   const PAGES = [
     { href: "carte.html", title: "Carte", icon: "M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2zm0 0v14m6-12v14" },
     { href: "comprendre.html", title: "Guide", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm4 4h8M8 13h8" },
@@ -284,12 +288,15 @@
       header.innerHTML =
         `<a class="brand" href="index.html"><img src="logo.svg" alt="" width="32" height="32" /> <span class="brand-name">Champis</span></a>` +
         `<nav aria-label="Pages">${PAGES.filter((p) => !p.support).map((p) => `<a href="${p.href}"${p.href === active ? ' aria-current="page"' : ""}>${p.title}</a>`).join("")}</nav>` +
-        `<span class="spacer"></span><a class="support" href="soutenir.html" aria-label="Soutenir"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${PAGES[2].icon}"/></svg><span class="support-label">Soutenir</span></a>`;
+        `<span class="spacer"></span>` +
+        (SUPPORT_VISIBLE ? `<a class="support" href="soutenir.html">Soutenir</a>` : "");
       if (tools) header.insertBefore(tools, header.querySelector(".spacer"));
     }
     const tabs = document.getElementById("site-tabs");
     if (tabs) {
-      tabs.innerHTML = PAGES.map(
+      const shown = PAGES.filter((p) => SUPPORT_VISIBLE || !p.support);
+      tabs.style.gridTemplateColumns = `repeat(${shown.length}, 1fr)`;
+      tabs.innerHTML = shown.map(
         (p) => `<a href="${p.href}"${p.href === active ? ' aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${p.icon}"/></svg>${p.title}</a>`
       ).join("");
     }
@@ -301,8 +308,9 @@
         `<a href="comprendre.html?article=donnees-et-sources">Données et licences</a>` +
         `<a href="comprendre.html?article=mentions-legales">Mentions légales</a>` +
         `<a href="mailto:${CONTACT_EMAIL}">Contact</a>` +
-        `<a href="soutenir.html">Soutenir Champis</a>`;
+        (SUPPORT_VISIBLE ? `<a href="soutenir.html">Soutenir Champis</a>` : "");
     }
+    if (!SUPPORT_VISIBLE) document.querySelectorAll("[data-support]").forEach((el) => el.remove());
   }
   function applyAccent(palette) {
     if (typeof document === "undefined") return;
@@ -364,7 +372,7 @@
   }
 
   const Site = {
-    WEEKDAYS, SHORT_WEEKDAYS, DAY_RANGE, SUPPORT_URL, APP_LINE, CONTACT_EMAIL, API_URL,
+    WEEKDAYS, SHORT_WEEKDAYS, DAY_RANGE, SUPPORT_URL, SUPPORT_VISIBLE, APP_LINE, CONTACT_EMAIL, API_URL,
     weekdayName, shortWeekday, frenchDate, shortDate, dateFor, whenWord, parisParts, computedPhrase, todayLine,
     trend, trendPhrase, geocodeUrl, geocodeResults, forestUrl, forestPhrase,
     hexToRgb, sortedClasses, classify, pixelColor, accentHex, classCounts, seasonSentence,

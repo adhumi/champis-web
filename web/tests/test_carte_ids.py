@@ -112,3 +112,26 @@ def test_map_bar_carries_picker_and_search_and_the_map_carries_the_basemap():
     geolocate = app.index("new maplibregl.GeolocateControl")
     assert geolocate < app.index("new BasemapControl()") < app.index("new LegendControl()")
     assert "shared/illustrations/" in app and "Site.layerItems" in app
+
+
+def test_support_links_follow_one_switch():
+    """« Soutenir » masqué le 9 nov. 2026 jusqu'à sa réactivation : un seul interrupteur,
+    `SUPPORT_VISIBLE` dans site.js, retire l'entrée de l'en-tête, des onglets, du pied de page, et
+    les liens marqués `data-support` ou conditionnés dans les pages."""
+    site = (WEB / "site.js").read_text(encoding="utf-8")
+    assert re.search(r"const SUPPORT_VISIBLE = (true|false);", site)
+    for page in sorted(WEB.glob("*.html")):
+        html = page.read_text(encoding="utf-8")
+        for m in re.finditer(r'<a href="soutenir\.html"', html):
+            before = html[: m.start()]
+            assert before.rfind("<span data-support>") > before.rfind("</span>"), page.name
+    guide = (WEB / "comprendre.js").read_text(encoding="utf-8")
+    assert "soutenir.html" not in guide or "Site.SUPPORT_VISIBLE" in guide
+
+
+def test_the_map_has_no_sidebar():
+    """9 nov. 2026 : plus de barre latérale sur ordinateur ; la légende s'ouvre au bouton des
+    commandes de la carte, comme sur téléphone, et la fiche flotte."""
+    html = (WEB / "carte.html").read_text(encoding="utf-8")
+    assert "--panel-w" not in html and "border-left" not in html
+    assert "#panel { display: contents; }" in html
