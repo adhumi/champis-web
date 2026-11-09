@@ -47,6 +47,10 @@ const $ = (id) => document.getElementById(id);
 let palette; // shared/palette.json
 let classes; // seuils triés décroissants avec rgb pré-parsé
 const species = new Map(); // id → { pm (null si l'espèce n'a que son G), label, names, group, bounds }
+// Espèces servies par GET /species : les espèces complètes (bloc about, photo, planche ; décision
+// du 9 nov. 2026). Quand l'API répond, une espèce absente du catalogue n'a pas de couche, même si
+// ses tuiles sont publiées (un T, ou un canal d'un G) ; null = pas d'API, tout ce qui arrive s'affiche.
+let catalogIds = null;
 // Fichiers G du jeu courant : clé "<groupe>" ou "<groupe>-<partie>" → { id, group, pm, label,
 // species: [ids dans l'ordre des canaux], bounds }. Quand toutes les espèces demandées d'une couche
 // ont un canal dans un G, une seule tuile G est lue pour elles (2 requêtes Range par tuile avec A,
@@ -752,6 +756,9 @@ async function fetchWeather() {
 
 const speciesMeta = (id) => fetch(`../species/${id}.json`).then((r) => (r.ok ? r.json() : null));
 
+/** Une espèce a sa couche si l'API la sert (catalogue des espèces complètes) ou sans API. */
+const isServed = (id) => catalogIds === null || catalogIds.has(id);
+
 /** Entrée de `species` pour un identifiant, créée depuis son fichier d'espèce si elle n'existe
  *  pas encore (une espèce peut n'être connue que par son G). */
 async function ensureSpecies(id, bounds) {
@@ -797,12 +804,13 @@ async function addSource(src, label, info = null) {
     const bounds = [header.minLon, header.minLat, header.maxLon, header.maxLat];
     const id = g.part > 1 ? `${g.group}-${g.part}` : g.group;
     groups.set(id, { id, group: g.group, pm, label, species: ids, bounds });
-    for (const sid of ids) await ensureSpecies(sid, bounds);
+    for (const sid of ids) if (isServed(sid)) await ensureSpecies(sid, bounds);
     ++tileVersion;
     return `G:${id}`;
   }
   const id = label.match(/(?:^|\/)T-([a-z_]+)-/)?.[1];
   if (!id) throw new Error(`Nom inattendu (T-<espèce>-…, G-<groupe>-… ou A-…pmtiles) : ${label}`);
+  if (!isServed(id)) return `T:${id} (espèce incomplète, non affichée)`;
   const pm = new pmtiles.PMTiles(src);
   const header = await pm.getHeader();
   const bounds = [header.minLon, header.minLat, header.maxLon, header.maxLat];
@@ -887,6 +895,12 @@ async function loadFromApi() {
     return; // API absente : page statique seule
   }
   if (!body.configured || body.tiles.length === 0) return;
+  try {
+    const r = await fetch(`${base}/species`);
+    if (r.ok) catalogIds = new Set(Object.keys((await r.json()).species));
+  } catch {
+    // catalogue injoignable : les tuiles publiées s'affichent toutes
+  }
   // Plusieurs jeux de départements peuvent coexister dans le bucket (Doubs seul, France…) ; une
   // espèce n'a qu'une couche à la fois : on garde le jeu qui couvre le plus de départements.
   const dh = pickDeptsHash(body);
