@@ -89,7 +89,7 @@
         html += speciesList(await loadSpecies());
         if (Site.APP_LINE) html += `<p class="app-line" id="app">${Site.esc(Site.APP_LINE)}</p>`;
       }
-      if (article.id === "comment-ca-marche") {
+      if (article.id === "comment-ca-marche" && Site.SUPPORT_VISIBLE) {
         html += `<p class="small muted">Champis est gratuit et financé par des dons : <a href="soutenir.html">soutenir le projet</a>.</p>`;
       }
       $("content").innerHTML = html;
