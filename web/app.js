@@ -72,8 +72,8 @@ const weather = { today: null, computedAt: null, cells: new Map(), index: null, 
 // Le bandeau des jours et l'indice par département (/departements) qui le colorait sont retirés de la
 // carte (spec › Produit › étape A, 6 nov. 2026) : la carte montre toujours aujourd'hui, les onze
 // jours d'un point sont dans sa fiche.
-// refonte UX, lot 2 : le potentiel toute saison est une option, le score du jour la règle
-const mode = () => ($("potential").checked ? "T" : "S"); // "T" ou "S"
+// Le potentiel toute saison (T seul) n'est plus proposé (9 nov. 2026) : la carte montre toujours le
+// score du jour S = T × M_eff × Φ.
 // La cellule météo est cherchée par bloc de pixels, pas par pixel (Field.blockPx : 16 px à partir
 // du zoom 9, moins en dessous), à moins de Field.MAX_CELL_KM (7,5 km), sinon le pixel est
 // transparent plutôt que de prendre la météo d'une cellule chargée pour une autre emprise.
@@ -98,15 +98,15 @@ if (Site.APP_LINE) $("app-line").textContent = Site.APP_LINE;
 else $("app-line").remove();
 $("dev").hidden = !DEV;
 
-// Sur téléphone le panneau se replie sur une ligne (couche courante + bouton) ; sur ordinateur il
-// est fixe à droite et la classe n'a aucun effet.
+// Sur téléphone, la légende et l'état de la météo sont dans un panneau qui s'ouvre au bouton
+// « Légende » des commandes de la carte ; sur ordinateur le panneau est fixe à droite et la classe
+// n'a aucun effet.
+let legendButton = null;
 function setPanel(open) {
-  $("panel").classList.toggle("collapsed", !open);
-  $("toggle").setAttribute("aria-expanded", String(open));
-  $("toggle").textContent = open ? "Fermer" : "Calque et légende";
+  $("panel").classList.toggle("open", open);
+  legendButton?.setAttribute("aria-expanded", String(open));
+  if (open) probe.style.display = "none"; // la fiche et le panneau se partagent le bas de l'écran
 }
-setPanel(false);
-$("toggle").addEventListener("click", () => setPanel($("panel").classList.contains("collapsed")));
 
 // ---------------------------------------------------------------- palette
 
@@ -295,41 +295,37 @@ function readPlanText(key) {
   return parts.join(" + ") || "rien";
 }
 
-/** Valeur affichée par pixel : T (max du groupe) ou S = T × M_eff × Φ (max du groupe, règle 9).
- *  En mode S, la cellule météo est cherchée une fois par bloc de pixels (Field.tileCells), pour
+/** Valeur affichée par pixel : S = T × M_eff × Φ (max du groupe, règle 9). La cellule météo est cherchée une fois par bloc de pixels (Field.tileCells), pour
  *  toutes les espèces ; le facteur M_eff × Φ est mémorisé par cellule et classe d'altitude, la
  *  classe étant lue par pixel dans la couche A quand elle est chargée. Un pixel sans cellule à
  *  moins de 7,5 km, ou dont la cellule n'a pas le jour demandé, reste transparent (jamais 0,5). */
 function combine(arrays, z, x, y, alt) {
   if (arrays.length === 0) return null;
   const out = new Float32Array(TILE * TILE).fill(NaN);
-  const useWeather = mode() === "S";
   const date = currentDate();
-  const block = useWeather ? Field.blockPx(z) : TILE;
+  const block = Field.blockPx(z);
   const blocks = TILE / block;
-  const cells = useWeather ? Field.tileCells(weather.index, z, x, y, TILE, block) : null;
+  const cells = Field.tileCells(weather.index, z, x, y, TILE, block);
   for (const { sid, t } of arrays) {
-    const memo = useWeather ? new Map() : null; // cellule → Map(classe → facteur)
+    const memo = new Map(); // cellule → Map(classe → facteur)
     for (let py = 0; py < TILE; py++) {
       const rowBlock = Math.floor(py / block) * blocks;
       for (let px = 0; px < TILE; px++) {
         const i = py * TILE + px;
         let v = t[i];
         if (Number.isNaN(v)) continue;
-        if (useWeather) {
-          const cell = cells[rowBlock + Math.floor(px / block)];
-          if (!cell) continue; // pas de météo pour ce pixel : transparent, jamais 0,5
-          const k = alt ? alt[i] : null;
-          let byClass = memo.get(cell);
-          if (!byClass) memo.set(cell, (byClass = new Map()));
-          let f = byClass.get(k);
-          if (f === undefined) {
-            f = Field.factor(cell, sid, date, Field.altCenter(cell, k, palette.alt_encoding));
-            byClass.set(k, f);
-          }
-          if (f === null) continue;
-          v *= f;
+        const cell = cells[rowBlock + Math.floor(px / block)];
+        if (!cell) continue; // pas de météo pour ce pixel : transparent, jamais 0,5
+        const k = alt ? alt[i] : null;
+        let byClass = memo.get(cell);
+        if (!byClass) memo.set(cell, (byClass = new Map()));
+        let f = byClass.get(k);
+        if (f === undefined) {
+          f = Field.factor(cell, sid, date, Field.altCenter(cell, k, palette.alt_encoding));
+          byClass.set(k, f);
         }
+        if (f === null) continue;
+        v *= f;
         if (Number.isNaN(out[i]) || v > out[i]) out[i] = v;
       }
     }
@@ -377,7 +373,7 @@ maplibregl.addProtocol("champis", async (params) => {
   let alt;
   try {
     // T des espèces et A en parallèle (cache mémoire : une lecture réseau par fichier et par tuile)
-    [arrays, alt] = await Promise.all([speciesT(m[1], z, x, y), mode() === "S" ? altTile(z, x, y) : null]);
+    [arrays, alt] = await Promise.all([speciesT(m[1], z, x, y), altTile(z, x, y)]);
   } catch (e) {
     // Après les réessais : tuile transparente plutôt qu'en erreur. MapLibre ne redemande jamais une
     // tuile en erreur ; celle-ci sera relue au prochain rendu (déplacement, jour, météo).
@@ -429,7 +425,75 @@ map.addControl(new maplibregl.NavigationControl(), "top-right");
 map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: false }), "top-right");
 map.addControl(new maplibregl.ScaleControl(), "bottom-right");
 
+const ICONS = {
+  layers: '<path d="m12 3 9 5-9 5-9-5 9-5z"/><path d="m3 13 9 5 9-5"/>',
+  legend: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+  check: '<path d="m5 12 5 5 9-10"/>',
+};
+const svg = (name, cls = "") => `<svg${cls ? ` class="${cls}"` : ""} viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+const BASEMAP_NAMES = { plan: "Plan IGN", ortho: "Photo aérienne IGN", osm: "OpenStreetMap" };
+let basemap = "plan";
+
+/** Fond de carte : un bouton sous « me localiser » (9 nov. 2026), qui ouvre la liste des trois fonds. */
+class BasemapControl {
+  onAdd() {
+    const box = document.createElement("div");
+    box.className = "maplibregl-ctrl maplibregl-ctrl-group basemap-ctrl";
+    box.innerHTML =
+      `<button type="button" title="Fond de carte" aria-label="Fond de carte" aria-haspopup="true" aria-expanded="false">${svg("layers")}</button>` +
+      `<div class="basemap-menu" role="menu" aria-label="Fond de carte" hidden>${Object.entries(BASEMAP_NAMES)
+        .map(([k, fr]) => `<button type="button" role="menuitemradio" data-basemap="${k}" aria-checked="${k === basemap}">${fr}${svg("check")}</button>`)
+        .join("")}</div>`;
+    const button = box.firstElementChild;
+    const menu = box.querySelector(".basemap-menu");
+    const open = (yes) => {
+      menu.hidden = !yes;
+      button.setAttribute("aria-expanded", String(yes));
+      if (yes) menu.querySelector('[aria-checked="true"]')?.focus();
+    };
+    button.addEventListener("click", () => open(menu.hidden));
+    menu.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-basemap]");
+      if (!b) return;
+      setBasemap(b.dataset.basemap);
+      menu.querySelectorAll("[data-basemap]").forEach((x) => x.setAttribute("aria-checked", String(x === b)));
+      open(false);
+      button.focus();
+    });
+    menu.addEventListener("keydown", (e) => {
+      const items = [...menu.querySelectorAll("[data-basemap]")];
+      const k = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        items[(k + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+      } else if (e.key === "Escape") {
+        open(false);
+        button.focus();
+      }
+    });
+    document.addEventListener("pointerdown", (e) => !box.contains(e.target) && open(false));
+    return box;
+  }
+  onRemove() {}
+}
+map.addControl(new BasemapControl(), "top-right");
+
+/** Légende sur téléphone : le panneau s'ouvre au bouton, sous le fond de carte (caché sur ordinateur). */
+class LegendControl {
+  onAdd() {
+    const box = document.createElement("div");
+    box.className = "maplibregl-ctrl maplibregl-ctrl-group legend-ctrl";
+    box.innerHTML = `<button type="button" title="Légende" aria-label="Légende" aria-controls="panel-sheet" aria-expanded="false">${svg("legend")}</button>`;
+    legendButton = box.firstElementChild;
+    legendButton.addEventListener("click", () => setPanel(!$("panel").classList.contains("open")));
+    return box;
+  }
+  onRemove() {}
+}
+map.addControl(new LegendControl(), "top-right");
+
 function setBasemap(name) {
+  basemap = name;
   if (map.getLayer("basemap")) map.removeLayer("basemap");
   if (map.getSource("basemap")) map.removeSource("basemap");
   map.addSource("basemap", { type: "raster", tileSize: TILE, ...BASEMAPS[name] });
@@ -437,11 +501,6 @@ function setBasemap(name) {
   map.addLayer({ id: "basemap", type: "raster", source: "basemap" }, above);
 }
 
-/** Couche affichée, dans la ligne repliée du panneau sur téléphone. */
-function updateMobileLayer() {
-  const layer = $("layer");
-  $("mobile-layer").textContent = layer.disabled ? "Carte" : layer.options[layer.selectedIndex]?.text ?? "Carte";
-}
 
 const frenchDate = Site.frenchDate;
 
@@ -468,25 +527,125 @@ function setLayer(key) {
 }
 
 map.on("load", () => {
-  setBasemap($("basemap").value);
+  setBasemap(basemap);
   loadPalette()
     .then(() => loadFromQuery() || loadFromApi())
     .catch((e) => ($("status").textContent = e.message));
 });
 
-$("basemap").addEventListener("change", (e) => setBasemap(e.target.value));
-$("layer").addEventListener("change", (e) => {
-  setLayer(e.target.value);
-  updateMobileLayer();
+
+// ---------------------------------------------------------------- sélecteur d'espèce (9 nov. 2026)
+// Dans la barre de navigation : miniature naturaliste (shared/illustrations/<id>.jpg), nom français
+// et nom latin atténué. Liste ARIA (`listbox`) : flèches, Début, Fin, Entrée, Échap, et la
+// première lettre d'un nom.
+
+let layerItems = [];
+let activeItem = -1; // entrée sous le clavier ou la souris, liste ouverte
+const pickerButton = $("layer");
+const pickerList = $("layer-list");
+const illustration = (id) => `../shared/illustrations/${encodeURIComponent(id)}.jpg`;
+const latinHtml = (it) => (it.la ? `<i>${esc(it.la)}</i>${it.spp ? " spp." : ""}` : "");
+const hideBrokenThumb = (img) => img.addEventListener("error", () => (img.style.visibility = "hidden"), { once: true });
+
+function renderPicker() {
+  const cur = layerItems.find((it) => it.value === currentKey);
+  pickerButton.disabled = layerItems.length === 0;
+  $("layer-fr").textContent = cur ? cur.fr : layerItems.length ? "Choisir une espèce" : "Aucune carte publiée";
+  $("layer-la").innerHTML = cur ? latinHtml(cur) : "";
+  const thumb = $("layer-thumb");
+  thumb.hidden = !cur;
+  if (cur && thumb.dataset.id !== cur.illustration) {
+    thumb.style.visibility = "";
+    thumb.dataset.id = cur.illustration;
+    thumb.src = illustration(cur.illustration);
+  }
+  pickerList.innerHTML = layerItems
+    .map((it, k) => {
+      const sep = k > 0 && layerItems[k - 1].spp && !it.spp ? '<li class="sep" role="separator"></li>' : "";
+      return (
+        sep +
+        `<li role="option" id="layer-opt-${k}" data-k="${k}" aria-selected="${it.value === currentKey}">` +
+        `<img class="thumb" src="${illustration(it.illustration)}" alt="" loading="lazy" decoding="async" />` +
+        `<span class="names"><span class="fr">${esc(it.fr)}</span><span class="la">${latinHtml(it)}</span></span>` +
+        svg("check", "check") +
+        `</li>`
+      );
+    })
+    .join("");
+  pickerList.querySelectorAll("img").forEach(hideBrokenThumb);
+}
+hideBrokenThumb($("layer-thumb"));
+
+function setActive(k) {
+  activeItem = k;
+  pickerList.querySelectorAll("[role=option]").forEach((li) => li.classList.toggle("active", +li.dataset.k === k));
+  const li = $(`layer-opt-${k}`);
+  if (li) {
+    pickerList.setAttribute("aria-activedescendant", li.id);
+    li.scrollIntoView({ block: "nearest" });
+  } else pickerList.removeAttribute("aria-activedescendant");
+}
+
+function openPicker(open) {
+  if (open && pickerButton.disabled) return;
+  pickerList.hidden = !open;
+  pickerButton.setAttribute("aria-expanded", String(open));
+  if (open) {
+    closeSearch();
+    pickerList.focus();
+    setActive(Math.max(0, layerItems.findIndex((it) => it.value === currentKey)));
+  }
+}
+
+function chooseLayer(k) {
+  const it = layerItems[k];
+  openPicker(false);
+  pickerButton.focus();
+  if (!it || it.value === currentKey) return;
+  setLayer(it.value);
+  renderPicker();
   noteReadPlan();
   fetchWeather();
+}
+
+pickerButton.addEventListener("click", () => openPicker(pickerList.hidden));
+pickerButton.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    openPicker(true);
+  }
 });
-$("potential").addEventListener("change", () => {
-  $("weather-status").hidden = mode() !== "S";
-  $("potential-note").hidden = mode() !== "T";
-  setLayer(currentKey);
-  updateTodayLine();
-  fetchWeather();
+pickerList.addEventListener("click", (e) => {
+  const li = e.target.closest("[role=option]");
+  if (li) chooseLayer(+li.dataset.k);
+});
+pickerList.addEventListener("pointermove", (e) => {
+  const li = e.target.closest("[role=option]");
+  if (li && +li.dataset.k !== activeItem) setActive(+li.dataset.k);
+});
+pickerList.addEventListener("keydown", (e) => {
+  const n = layerItems.length;
+  const moves = { ArrowDown: activeItem + 1, ArrowUp: activeItem - 1, Home: 0, End: n - 1 };
+  if (e.key in moves) {
+    e.preventDefault();
+    setActive(Math.min(n - 1, Math.max(0, moves[e.key])));
+  } else if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    chooseLayer(activeItem);
+  } else if (e.key === "Escape" || e.key === "Tab") {
+    if (e.key === "Escape") e.preventDefault();
+    openPicker(false);
+    if (e.key === "Escape") pickerButton.focus();
+  } else if (e.key.length === 1) {
+    const c = e.key.toLocaleLowerCase("fr");
+    const from = activeItem + 1;
+    const order = [...layerItems.keys()].map((i) => (from + i) % n);
+    const k = order.find((i) => layerItems[i].fr.toLocaleLowerCase("fr").startsWith(c));
+    if (k !== undefined) setActive(k);
+  }
+});
+document.addEventListener("pointerdown", (e) => {
+  if (!pickerList.hidden && !$("picker").contains(e.target)) openPicker(false);
 });
 // API : api.champis.app (le site est un service à part), l'API locale en développement, ou `?api=` (Site.apiBase).
 $("api").value = Site.apiBase(location);
@@ -500,11 +659,9 @@ map.on("moveend", () => {
 
 // ---------------------------------------------------------------- météo (API)
 
-/** Ligne sous la carte (étape A) : « Aujourd'hui, ven. 6 nov. · météo calculée à 4 h », ou le
- *  rappel du potentiel toute saison, qui ne dépend d'aucun jour. */
+/** Ligne sous la carte (étape A) : « Aujourd'hui, ven. 6 nov. · météo calculée à 4 h ». */
 function updateTodayLine() {
-  $("today-line").textContent =
-    mode() === "T" ? "Potentiel toute saison, indépendant de la météo" : Site.todayLine(weather.today, weather.computedAt);
+  $("today-line").textContent = Site.todayLine(weather.today, weather.computedAt);
 }
 
 /** L'emprise demandée tient-elle dans une réponse complète déjà reçue pour la même couche, de
@@ -527,7 +684,7 @@ function weatherCovers(box, useField) {
 let weatherAbort = null;
 let retryTimer = null;
 async function fetchWeather() {
-  if (mode() !== "S" || !currentKey) return;
+  if (!currentKey) return;
   const ids = layerSpecies(currentKey).map((s) => s.id);
   if (ids.length === 0) return;
   const b = map.getBounds();
@@ -706,22 +863,9 @@ async function addMany(items) {
 }
 
 function refreshLayerList() {
-  const sel = $("layer");
-  sel.innerHTML = "";
-  const groups = new Map();
-  for (const s of species.values()) if (s.group) groups.set(s.group.id, s.group.fr);
-  for (const [gid, fr] of groups) {
-    sel.add(new Option(fr, `g:${gid}`));
-  }
-  for (const [id, s] of [...species].sort((a, b) => a[1].names.fr.localeCompare(b[1].names.fr))) {
-    sel.add(new Option(s.names.fr, `s:${id}`));
-  }
-  sel.disabled = species.size === 0;
-  updateMobileLayer();
-  if (species.size > 0 && (!currentKey || ![...sel.options].some((o) => o.value === currentKey))) {
-    sel.value = sel.options[0].value;
-    setLayer(sel.value);
-  }
+  layerItems = Site.layerItems([...species.values()]);
+  if (layerItems.length > 0 && !layerItems.some((it) => it.value === currentKey)) setLayer(layerItems[0].value);
+  renderPicker();
 }
 
 function loadFromQuery() {
@@ -841,7 +985,7 @@ function renderProbe({ value, name, phrases, details, days = null, forest = null
   const when = currentDate() ? Site.whenWord(currentDate(), weather.today) : "";
   const sub = [name, currentDate() ? frenchDate(currentDate()) : ""].filter(Boolean).join(" · ");
   probe.innerHTML =
-    `<h2><span class="dot" style="background:${cls.hex}"></span>${esc(cls.fr)} ${mode() === "S" ? esc(when) : "toute saison"}</h2>` +
+    `<h2><span class="dot" style="background:${cls.hex}"></span>${esc(cls.fr)} ${esc(when)}</h2>` +
     `<div class="sub">${esc(sub)}</div>` +
     (phrases.length ? `<ul>${phrases.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : "") +
     (days ? `<div id="probe-days" aria-label="Les onze jours de ce point"></div>` : "") +
@@ -906,24 +1050,24 @@ map.on("click", async (e) => {
   const arrays = await speciesT(currentKey, z, tx, ty);
   const altIdx = (await altTile(z, tx, ty))?.[i] ?? null;
   probe.style.display = "block";
-  // meilleure espèce du groupe au point cliqué (T seul, ou S si la météo est affichée)
+  // meilleure espèce du groupe au point cliqué (S = T × M_eff × Φ)
   let best = null;
   for (const { sid, t } of arrays) {
     const T = t[i];
     if (Number.isNaN(T)) continue;
-    const w = mode() === "S" ? weatherFactor(sid, e.lngLat.lat, e.lngLat.lng, altIdx) : 1;
+    const w = weatherFactor(sid, e.lngLat.lat, e.lngLat.lng, altIdx);
     if (w === null) continue;
     const v = T * w;
     if (!best || v > best.v) best = { sid, T, v };
   }
   if (!best) {
-    probe.textContent = mode() === "S" && arrays.some((a) => !Number.isNaN(a.t[i]))
+    probe.textContent = arrays.some((a) => !Number.isNaN(a.t[i]))
       ? "Pas de météo pour ce secteur aujourd'hui : le serveur réessaie."
       : "Hors forêt ou pas de donnée ici.";
     return;
   }
   const name = species.get(best.sid)?.names.fr ?? best.sid;
-  const { class_m, nodata } = palette.alt_encoding;
+  const { nodata } = palette.alt_encoding;
   // statut de la forêt en parallèle : la fiche s'affiche sans l'attendre et le gagne à son arrivée
   let shown = null;
   let forest = null;
@@ -935,17 +1079,6 @@ map.on("click", async (e) => {
     forest = f;
     if (f && shown && token === probeToken) show(shown);
   });
-  if (mode() === "T") {
-    // sans météo, la classe vient de la couche A seule (pas de cellule pour s'y rabattre)
-    const alt = altIdx !== null && altIdx !== nodata ? `altitude ${altIdx * class_m}–${(altIdx + 1) * class_m} m` : "altitude inconnue";
-    show({
-      value: best.T,
-      name,
-      phrases: [terrainPhrase(best.T), "potentiel toute saison, sans la météo"],
-      details: `T = ${best.T.toFixed(3)} · ${alt}`,
-    });
-    return;
-  }
   // sous FIELD_ZOOM, M_eff × Φ vient du champ du jour ; les phrases et les facteurs, de
   // GET /weather?cell= dans les deux cas
   const cell = Field.nearestCell(weather.index, e.lngLat.lat, e.lngLat.lng);
@@ -1001,7 +1134,7 @@ $("search-q").addEventListener("input", (e) => {
           map.flyTo({ center: [f.lon, f.lat], zoom: 12 });
           searchResults.hidden = true;
           $("search-q").value = f.label;
-          setPanel(false);
+          closeSearch();
         })
       );
     } catch (err) {
@@ -1016,7 +1149,35 @@ $("search").addEventListener("submit", (e) => {
   e.preventDefault();
   searchResults.querySelector("button")?.click();
 });
+// Dans la barre de navigation (9 nov. 2026) : champ visible sur grand écran ; plus étroit, une loupe
+// qui le déplie par-dessus toute la barre (sur téléphone, par-dessus le sélecteur).
+const header = $("site-header");
+function closeSearch() {
+  if (!header.classList.contains("searching")) return;
+  header.classList.remove("searching");
+  $("search-open").setAttribute("aria-expanded", "false");
+  searchResults.hidden = true;
+}
 $("search-open").addEventListener("click", () => {
-  setPanel(true);
+  openPicker(false);
+  header.classList.add("searching");
+  $("search-open").setAttribute("aria-expanded", "true");
   $("search-q").focus();
+});
+$("search-close").addEventListener("click", () => {
+  closeSearch();
+  $("search-open").focus();
+});
+$("search").addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  searchResults.hidden = true;
+  if (header.classList.contains("searching")) {
+    closeSearch();
+    $("search-open").focus();
+  }
+});
+document.addEventListener("pointerdown", (e) => {
+  if ($("search").contains(e.target)) return;
+  searchResults.hidden = true;
+  if (!$("search-q").value) closeSearch();
 });

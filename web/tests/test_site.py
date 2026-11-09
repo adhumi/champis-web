@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -299,3 +300,58 @@ def test_contact_address_is_the_one_of_the_legal_notice():
     assert 'href="mailto:${CONTACT_EMAIL}"' in source
     legal = (REFERENTIAL / "shared" / "texts" / "mentions-legales.md").read_text(encoding="utf-8")
     assert "hello@champis.app" in legal
+
+
+def _plain(text: str) -> str:
+    """Clé de tri sans accents ni casse, comme `localeCompare(…, "fr")` pour ces noms."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", text) if not unicodedata.combining(c)
+    ).casefold()
+
+
+def test_layer_items_for_the_species_picker():
+    """Sélecteur d'espèce de la carte (9 nov. 2026) : les groupes d'abord, avec leurs genres
+    (« Boletus spp. ») et la planche d'une de leurs espèces, puis les espèces par nom français,
+    chacune avec son nom latin et sa propre planche (shared/illustrations/<id>.jpg)."""
+    species = [
+        json.loads(p.read_text(encoding="utf-8"))
+        for p in sorted((REFERENTIAL / "species").glob("*.json"))
+    ]
+    items = call(("layerItems", [species]))[0]
+    groups = [it for it in items if it["spp"]]
+    singles = [it for it in items if not it["spp"]]
+    assert items == groups + singles
+    assert len(singles) == len(species)
+    assert {g["value"] for g in groups} == {f"g:{s['group']['id']}" for s in species}
+    frs = [it["fr"] for it in singles]
+    assert frs == sorted(frs, key=_plain)
+    illustrations = REFERENTIAL / "shared" / "illustrations"
+    by_id = {s["id"]: s for s in species}
+    for it in items:
+        assert (illustrations / f"{it['illustration']}.jpg").is_file(), it
+        member = by_id[it["illustration"]]
+        if it["spp"]:
+            assert it["value"] == f"g:{member['group']['id']}"
+            genera = sorted(
+                {
+                    s["names"]["la"].split()[0]
+                    for s in species
+                    if s["group"]["id"] == member["group"]["id"]
+                }
+            )
+            assert it["la"] == ", ".join(genera)
+        else:
+            assert it["value"] == f"s:{member['id']}"
+            assert (it["fr"], it["la"]) == (member["names"]["fr"], member["names"]["la"])
+
+
+def test_layer_items_without_group_or_latin_name():
+    items = call(
+        (
+            "layerItems",
+            [[{"id": "x_y", "names": {"fr": "Espèce seule", "la": ""}, "group": None}]],
+        )
+    )[0]
+    assert items == [
+        {"value": "s:x_y", "fr": "Espèce seule", "la": "", "spp": False, "illustration": "x_y"}
+    ]
