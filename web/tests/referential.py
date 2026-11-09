@@ -33,6 +33,22 @@ def load_species(species_id: str) -> dict[str, Any]:
     return _read(REFERENTIAL / "species" / f"{species_id}.json")
 
 
+def is_complete(species_id: str) -> bool:
+    """Même règle que `champis_pipeline.species.completeness` (décision du 9 nov. 2026) : bloc
+    `about`, photo choisie et planche `shared/illustrations/<id>.jpg`. L'API ne sert que ces
+    espèces au site ; une espèce sans planche n'a ni fiche ni couche."""
+    about = load_species(species_id).get("about") or {}
+    return (
+        bool(about)
+        and bool(about.get("photo"))
+        and (REFERENTIAL / "shared" / "illustrations" / f"{species_id}.jpg").is_file()
+    )
+
+
+def list_complete_species() -> list[str]:
+    return [sid for sid in list_species() if is_complete(sid)]
+
+
 def species_groups() -> dict[str, list[str]]:
     """`group.id` → identifiants triés : l'ordre des canaux des PMTiles G."""
     groups: dict[str, list[str]] = {}

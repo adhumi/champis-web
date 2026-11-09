@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from referential import REFERENTIAL, load_palette
+from referential import REFERENTIAL, list_complete_species, list_species, load_palette, load_species
 
 HERE = Path(__file__).parent
 DRIVER = HERE / "site_driver.js"
@@ -313,10 +313,10 @@ def test_layer_items_for_the_species_picker():
     """Sélecteur d'espèce de la carte (9 nov. 2026) : les groupes d'abord, avec leurs genres
     (« Boletus spp. ») et la planche d'une de leurs espèces, puis les espèces par nom français,
     chacune avec son nom latin et sa propre planche (shared/illustrations/<id>.jpg)."""
-    species = [
-        json.loads(p.read_text(encoding="utf-8"))
-        for p in sorted((REFERENTIAL / "species").glob("*.json"))
-    ]
+    # ce que GET /species sert au site : les espèces complètes, avec leur planche (9 nov. 2026) ;
+    # les autres existent dans le référentiel sans apparaître sur la carte
+    species = [load_species(sid) for sid in list_complete_species()]
+    assert 0 < len(species) < len(list_species())
     items = call(("layerItems", [species]))[0]
     groups = [it for it in items if it["spp"]]
     singles = [it for it in items if not it["spp"]]
