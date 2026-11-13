@@ -15,4 +15,4 @@ make setup && make serve        # http://localhost:8080/web/
 make check                      # lint et tests (Python + node, sans réseau)
 ```
 
-Code sous licence MIT ; les fichiers du référentiel (espèces, palette, textes) sous licence CC BY 4.0.
+Code sous licence MIT ; les fichiers du référentiel (espèces, palette, textes) sous licence CC BY 4.0. Bibliothèques et données tierces : [`THIRD_PARTY.md`](THIRD_PARTY.md).

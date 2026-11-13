@@ -7,7 +7,7 @@ bibliothèques sont copiées telles quelles depuis le registre npm, empreintes v
 | Dossier | Paquet | Licence | Empreinte de l'archive npm |
 | --- | --- | --- | --- |
 | `maplibre-gl-6.18.0/` | `maplibre-gl@6.18.0` (`dist/maplibre-gl.mjs`, `dist/maplibre-gl-worker.mjs`, `dist/maplibre-gl.css`) | BSD-3-Clause, `LICENSE.txt` joint | `sha512-8ucT+RhJtEZGFvWGPioVQwvOPMAIuUehEgxl2dELw9aJmX4SpUi+OCHHAD33B9EuohNC7kC/gccJacUgTMQfQQ==` |
-| `pmtiles-3.2.1/` | `pmtiles@3.2.1` (`dist/pmtiles.js`) | BSD-3-Clause (champ `license` du paquet ; texte : https://github.com/protomaps/PMTiles/blob/main/LICENSE) | `sha512-3R4fBwwoli5mw7a6t1IGwOtfmcSAODq6Okz0zkXhS1zi9sz1ssjjIfslwPvcWw5TNhdjNBUg9fgfPLeqZlH6ng==` |
+| `pmtiles-3.2.1/` | `pmtiles@3.2.1` (`dist/pmtiles.js`) | BSD-3-Clause, `LICENSE` joint (le paquet npm n'en contient pas : texte du dépôt protomaps/PMTiles) ; `pmtiles.js` inclut fflate (MIT, `LICENSE-fflate` joint, texte du paquet `fflate@0.8.2`) | `sha512-3R4fBwwoli5mw7a6t1IGwOtfmcSAODq6Okz0zkXhS1zi9sz1ssjjIfslwPvcWw5TNhdjNBUg9fgfPLeqZlH6ng==` |
 
 MapLibre GL JS 6 (13 nov. 2026, montée depuis 4.7.1 : l'avis GHSA-jrc7-96c5-q579 touche toutes les
 versions jusqu'à 6.4.0) n'est plus publié qu'en module ES : `web/maplibre.js` importe
