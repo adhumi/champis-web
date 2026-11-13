@@ -1,4 +1,6 @@
 # CI du site : lint et tests (Python + node, sans réseau), configuration du serveur statique.
+# Les actions sont épinglées par le SHA complet de leur commit (le tag en commentaire) : un tag se
+# déplace, un commit non. Pour monter une version : `git ls-remote https://github.com/<action> refs/tags/<tag>`.
 name: CI
 
 on:
@@ -6,6 +8,10 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+
+# Le jeton du workflow ne fait que lire le dépôt ; le déploiement passe par RAILWAY_TOKEN.
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -18,7 +24,7 @@ jobs:
       # Le référentiel adhumi/champis est le sous-module champis/ ; tant qu'il est privé, le jeton
       # par défaut ne le lit pas : CHAMPIS_REFERENTIEL_TOKEN (jeton à granularité fine, lecture du
       # contenu de adhumi/champis seulement). Une fois le dépôt public, le secret devient inutile.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
@@ -38,11 +44,11 @@ jobs:
         env:
           REFERENTIEL_TOKEN: ${{ secrets.CHAMPIS_REFERENTIEL_TOKEN }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -57,37 +63,34 @@ jobs:
       - name: Tests (fonctions pures en node, décodeur PNG, identifiants des pages)
         run: uv run pytest
 
-      - name: Configuration Caddy valide
-        run: docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-
-      # L'image que Railway fera tourner : pages et référentiel servis, santé propre au site, relais
-      # vers l'API (ici une fausse API locale : pas de réseau, pas de dépendance à la production).
-      - name: Image du site (build, chemins servis, relais vers l'API)
+      # L'image que Railway fera tourner : pages et référentiel servis, santé propre au site, 404
+      # pour tout le reste (plus de relais vers l'API). Sans réseau ni dépendance à la production.
+      # Le Caddyfile est validé par le Caddy de l'image (une seule version épinglée, celle du
+      # Dockerfile), qui tourne ensuite sans privilège : l'utilisateur de l'image n'est pas root.
+      - name: Image du site (build, configuration Caddy valide, chemins servis)
         run: |
           docker build -t champis-web .
-          python3 scripts/fake_api.py 8000 &
-          docker run -d --name site --network host -e CHAMPIS_API_UPSTREAM=http://127.0.0.1:8000 champis-web
+          docker run --rm champis-web caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          test "$(docker run --rm champis-web id -u)" != 0
+          docker run -d --name site --network host champis-web
           for i in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:8080/health && break; sleep 1; done
           sh scripts/smoke.sh http://localhost:8080
-          # relais : chemin et requête intacts, adresse du visiteur en tête de X-Forwarded-For
-          out=$(curl -sS -H 'X-Forwarded-For: 203.0.113.7' 'http://localhost:8080/weather?cell=42')
-          echo "$out"
-          echo "$out" | python3 -c 'import json, sys; r = json.load(sys.stdin); assert r["path"] == "/weather?cell=42", r; assert r["x_forwarded_for"].split(",")[0].strip() == "203.0.113.7", r'
-          test -z "$(curl -sS -o /dev/null -D - http://localhost:8080/weather | tr -d '\r' | grep -i '^server:')"
+          test -z "$(curl -sS -o /dev/null -D - http://localhost:8080/ | tr -d '\r' | grep -i '^server:')"
           docker logs site 2>&1 | tail -n 5
 
   # Railway ne récupère pas les sous-modules (build depuis un instantané sans .git) : la CI, qui a le
   # référentiel, déploie elle-même avec `railway up` après des tests verts sur main, ou à la main
-  # (workflow_dispatch). RAILWAY_TOKEN : jeton de projet Railway (environnement production).
+  # (workflow_dispatch), depuis main seulement : un lancement manuel sur une autre branche teste
+  # sans déployer. RAILWAY_TOKEN : jeton de projet Railway (environnement production).
   deploy:
     needs: web
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-champis-web
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
@@ -107,12 +110,13 @@ jobs:
         env:
           REFERENTIEL_TOKEN: ${{ secrets.CHAMPIS_REFERENTIEL_TOKEN }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
+      # version fixe : la CLI reçoit RAILWAY_TOKEN, une version nouvelle se choisit ici
       - name: Railway CLI
-        run: npm install -g @railway/cli
+        run: npm install -g @railway/cli@5.74.0
 
       # sans remote GitHub, la CLI envoie l'arbre de travail, sous-module compris
       - name: Déploiement (service champis-web)

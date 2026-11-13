@@ -176,6 +176,11 @@
     const s = Math.min(Math.max(v, 0), 1);
     return [...hexToRgb(hex), Math.floor(255 * (lo + (hi - lo) * s) + 0.5)];
   }
+  /** Une couleur de la palette avant de l'écrire dans un attribut `style` : `#` puis 3 à 8 chiffres
+   *  hexadécimaux, sinon `transparent` (la palette vient d'un fichier, pas du code). */
+  const safeHex = (hex) => (typeof hex === "string" && /^#[0-9a-fA-F]{3,8}$/.test(hex) ? hex : "transparent");
+  /** Un identifiant d'espèce du référentiel (`boletus_edulis`) : le seul qui entre dans un chemin. */
+  const isSpeciesId = (id) => typeof id === "string" && /^[a-z0-9_]+$/.test(id);
   /** Le violet de l'échelle sert d'accent au site ; sans `scale` (API ancienne), le « Bon ». */
   function accentHex(palette) {
     if (palette.scale) return palette.scale.hex;
@@ -258,14 +263,17 @@
   // ------------------------------------------------------------ adresse de l'API et mode dev
   /** Le site (champis.app) et l'API (api.champis.app) sont deux services depuis le découpage des
    *  dépôts (6 nov. 2026). En local, l'API de `make serve` (champis-api) répond sur le port 8000 ;
-   *  `?api=…` l'indique autrement. */
+   *  `?api=…` l'indique autrement. Hors d'un poste de développement, aucun paramètre d'URL ne
+   *  change une source de données (`?api=`, `?tiles=`) : un lien piégé ferait lire à la page les
+   *  réponses d'un serveur tiers. */
   const API_URL = "https://api.champis.app";
   const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
+  const isLocal = (loc) => LOCAL_HOSTS.includes(loc.hostname);
   function apiBase(loc) {
+    if (!isLocal(loc)) return API_URL;
     const q = new URLSearchParams(loc.search).get("api");
     if (q) return q.replace(/\/$/, "");
-    if (LOCAL_HOSTS.includes(loc.hostname)) return `${loc.protocol || "http:"}//${loc.hostname}:8000`;
-    return API_URL;
+    return `${loc.protocol || "http:"}//${loc.hostname}:8000`;
   }
   const isDev = (search) => new URLSearchParams(search).get("dev") === "1";
 
@@ -332,7 +340,7 @@
     const nodata = `<span class="nodata"><i></i>Transparent : hors forêt ou sans donnée</span>`;
     if (!palette.scale) {
       el.innerHTML =
-        [...classes].reverse().map((c) => `<span><i style="background:${c.hex}"></i>${esc(c.fr)}</span>`).join("") + nodata;
+        [...classes].reverse().map((c) => `<span><i style="background:${safeHex(c.hex)}"></i>${esc(c.fr)}</span>`).join("") + nodata;
       return;
     }
     const [r, g, b] = hexToRgb(palette.scale.hex);
@@ -348,7 +356,7 @@
       .join("");
     el.innerHTML =
       `<div class="scale" role="img" aria-label="${esc(classes.map((c) => c.fr).reverse().join(", "))} : du transparent au violet foncé">` +
-      `<div class="bar" style="background-image:linear-gradient(to right, rgba(${r},${g},${b},0), ${palette.scale.hex})"></div>` +
+      `<div class="bar" style="background-image:linear-gradient(to right, rgba(${r},${g},${b},0), ${safeHex(palette.scale.hex)})"></div>` +
       `<div class="words">${words}</div></div>` +
       nodata;
   }
@@ -365,7 +373,7 @@
         const label = `${iso === today ? "aujourd'hui, " : ""}${frenchDate(iso)} : ${known ? cls.fr : "pas de météo"}`;
         return (
           `<span role="listitem" class="day${iso === today ? " today" : ""}${iso < today ? " past" : ""}" title="${esc(label)}" aria-label="${esc(label)}">` +
-          `<i style="background:${known ? cls.hex : "transparent"}"></i><span>${SHORT_WEEKDAYS[parse(iso).getUTCDay()]}</span><span>${parse(iso).getUTCDate()}</span></span>`
+          `<i style="background:${known ? safeHex(cls.hex) : "transparent"}"></i><span>${SHORT_WEEKDAYS[parse(iso).getUTCDay()]}</span><span>${parse(iso).getUTCDate()}</span></span>`
         );
       })
       .join("");
@@ -375,8 +383,8 @@
     WEEKDAYS, SHORT_WEEKDAYS, DAY_RANGE, SUPPORT_URL, SUPPORT_VISIBLE, APP_LINE, CONTACT_EMAIL, API_URL,
     weekdayName, shortWeekday, frenchDate, shortDate, dateFor, whenWord, parisParts, computedPhrase, todayLine,
     trend, trendPhrase, geocodeUrl, geocodeResults, forestUrl, forestPhrase,
-    hexToRgb, sortedClasses, classify, pixelColor, accentHex, classCounts, seasonSentence,
-    esc, inline, renderMarkdown, markdownTitle, apiBase, isDev,
+    hexToRgb, safeHex, isSpeciesId, sortedClasses, classify, pixelColor, accentHex, classCounts, seasonSentence,
+    esc, inline, renderMarkdown, markdownTitle, apiBase, isLocal, isDev,
     layerItems, renderNav, applyAccent, loadPalette, renderLegend, renderDayDots,
   };
   root.Site = Site;

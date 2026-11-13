@@ -8,10 +8,8 @@
   <title>Champis — la météo des champignons</title>
   <link rel="icon" href="logo.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="site.css" />
-  <script>
-    // anciens liens vers la carte (index.html#zoom/lat/lon, ?tiles=…, ?dev=1) : ils y vont toujours
-    if (/^#\d/.test(location.hash) || location.search) location.replace("carte.html" + location.search + location.hash);
-  </script>
+  <!-- anciens liens vers la carte (index.html#zoom/lat/lon, ?dev=1) : ils y vont toujours -->
+  <script src="anciens-liens.js"></script>
 </head>
 <body>
   <header id="site-header"></header>
@@ -62,16 +60,6 @@
   <nav id="site-tabs" aria-label="Pages"></nav>
   <footer class="site-footer"></footer>
   <script src="site.js"></script>
-  <script>
-    Site.renderNav("index.html");
-    Site.loadPalette()
-      .then((palette) => Site.renderLegend(document.getElementById("legend"), palette))
-      .catch(() => {});
-    if (Site.APP_LINE) {
-      const line = document.getElementById("app-line");
-      line.textContent = Site.APP_LINE;
-      line.hidden = false;
-    }
-  </script>
+  <script src="index.js"></script>
 </body>
 </html>

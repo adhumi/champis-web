@@ -1,21 +1,33 @@
 # Site champis.app (adhumi/champis-web) : service statique Railway depuis le découpage des dépôts
 # (spec › Produit › Étape C, lot C7, 6 nov. 2026). Les pages sont à la racine (/, /carte.html…),
-# /shared/ et /species/ servent le référentiel (sous-module champis/). L'API est sur api.champis.app.
+# /shared/ et /species/ servent le référentiel (sous-module champis/). L'API est sur api.champis.app :
+# ce service ne relaie plus rien vers elle (relais des anciennes versions de l'app retiré le
+# 13 nov. 2026), tout chemin qui n'est pas un fichier servi ici répond 404.
 {
 	admin off
 	auto_https off
-	# Le conteneur n'est joignable que par le proxy de Railway : son X-Forwarded-For (l'adresse du
-	# visiteur) est gardé en tête et relayé tel quel. Le limiteur de débit de l'API en lit le premier
-	# élément ; sans ce réglage, tous les visiteurs relayés auraient l'adresse du proxy.
-	servers {
-		trusted_proxies static 0.0.0.0/0 ::/0
-	}
 }
 
 :{$PORT:8080} {
+	# En-têtes de sécurité, sur toute réponse (13 nov. 2026). La CSP n'ouvre que ce que le code
+	# joint (web/tests/test_carte_ids.py compare ses hôtes à ceux de site.js et app.js) :
+	# - script-src et worker-src 'self' : aucun script en ligne, MapLibre (module ES) et son worker
+	#   viennent de /vendor/, par leur adresse (pas de blob:, pas d'eval) ;
+	# - style-src 'unsafe-inline' : blocs <style> des pages et attributs style du rendu (légende,
+	#   pastilles) ;
+	# - img-src data: (icônes des commandes de MapLibre, dans sa feuille de style) et blob: (repli
+	#   de MapLibre pour décoder une tuile là où createImageBitmap manque) ; les fonds de carte
+	#   sont lus par fetch, donc par connect-src ;
+	# - connect-src : l'API (météo, catalogue, manifeste et tuiles PMTiles, relayées par
+	#   /tiles/<nom> : CHAMPIS_TILES_MODE=proxy), la Géoplateforme de l'IGN (fonds Plan IGN et
+	#   photo aérienne, recherche de commune, forêts publiques) et OpenStreetMap (fond au choix).
+	#   Si l'API repasse en URL présignées, ajouter ici l'hôte du bucket.
 	header {
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Permissions-Policy "geolocation=(self)"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.champis.app https://data.geopf.fr https://tile.openstreetmap.org; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 		-Server
 	}
 
@@ -41,8 +53,7 @@
 	}
 
 	# Le site, à la racine : / et tout chemin qui est un fichier de web/ (/carte.html, /site.css,
-	# /vendor/…). Un chemin qui n'y est pas part vers l'API, plus bas : ne pas nommer un fichier de
-	# web/ comme une route de l'API.
+	# /vendor/…).
 	rewrite / /index.html
 	@site file {
 		root /srv/web
@@ -61,7 +72,6 @@
 	}
 
 	# Le référentiel, et les fichiers du site à leur ancien chemin /web/ (mêmes règles de cache).
-	# GET /species (sans barre finale) reste à l'API.
 	@referentiel path /web/* /shared/* /species/*
 	handle @referentiel {
 		root * /srv
@@ -73,13 +83,10 @@
 		file_server
 	}
 
-	# Tout le reste part vers l'API : les versions de l'app d'avant le découpage l'appellent sur
-	# champis.app (/weather, /tiles, /observations, /coins…). Relais à retirer quand plus aucune
-	# version en service n'utilise cette adresse (spec › Étape C, lot C7). CHAMPIS_API_UPSTREAM sert
-	# à la CI (fausse API locale).
+	# Tout le reste n'existe pas ici. Le relais vers l'API (les versions de l'app d'avant le
+	# découpage appelaient /weather, /tiles, /observations… sur champis.app) est retiré : l'API
+	# n'est jointe que par api.champis.app.
 	handle {
-		reverse_proxy {$CHAMPIS_API_UPSTREAM:https://api.champis.app} {
-			header_up Host {http.reverse_proxy.upstream.host}
-		}
+		respond "Page introuvable" 404
 	}
 }

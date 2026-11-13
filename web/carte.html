@@ -7,12 +7,11 @@
   <title>Champis — carte</title>
   <link rel="icon" href="logo.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="site.css" />
-  <link rel="stylesheet" href="vendor/maplibre-gl-4.7.1/maplibre-gl.css" />
+  <link rel="stylesheet" href="vendor/maplibre-gl-6.18.0/maplibre-gl.css" />
   <style>
     /* Carte plein écran ; la barre de navigation flotte au-dessus, sur ordinateur comme sur téléphone
        (9 nov. 2026) : logo, pages, sélecteur d'espèce, recherche, Soutenir (masqué pour l'instant).
-       Pas de barre latérale : légende au bouton, fiche flottante ; étude des largeurs dans
-       ETUDE-barre-carte-2026-11-09.md. */
+       Pas de barre latérale : légende au bouton, fiche flottante. */
     :root { --bar-gap: 12px; --bar-h: 52px; }
     main.carte { display: grid; grid-template-columns: minmax(0, 1fr); height: 100vh; height: 100dvh; }
     #map-col { position: relative; display: flex; flex-direction: column; min-width: 0; }
@@ -226,12 +225,14 @@
   </main>
   <nav id="site-tabs" aria-label="Pages"></nav>
   <footer class="site-footer"></footer>
-  <script src="vendor/maplibre-gl-4.7.1/maplibre-gl.js"></script>
-  <script src="vendor/pmtiles-3.2.1/pmtiles.js"></script>
-  <script src="png.js"></script>
-  <script src="site.js"></script>
-  <script src="field.js"></script>
-  <script src="groups.js"></script>
-  <script src="app.js"></script>
+  <!-- MapLibre est un module ES (maplibre.js le pose en global) : les scripts suivants sont
+       différés pour s'exécuter après lui, dans cet ordre. -->
+  <script type="module" src="maplibre.js"></script>
+  <script defer src="vendor/pmtiles-3.2.1/pmtiles.js"></script>
+  <script defer src="png.js"></script>
+  <script defer src="site.js"></script>
+  <script defer src="field.js"></script>
+  <script defer src="groups.js"></script>
+  <script defer src="app.js"></script>
 </body>
 </html>
