@@ -38,6 +38,9 @@ check "/web/comprendre.html?article=confidentialite" "301 $BASE/comprendre.html?
 check /web/departements.geojson 200
 check /web/site.js 200
 check /web/absent.css 404
+# la documentation du dépôt n'est pas servie (docs/web.md, l'ancien web/README.md)
+check /README.md 404
+check /web/README.md 404
 # plus de relais vers l'API (13 nov. 2026) : ses routes n'existent pas sur le site
 check /species 404
 check "/weather?cell=42" 404

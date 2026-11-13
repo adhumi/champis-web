@@ -1,6 +1,6 @@
 # Champis — le site champis.app
 
-La météo des champignons, forêt par forêt : accueil, carte à 25 m, Guide, soutien. Pages statiques sans build ; le détail des pages est dans [`web/README.md`](web/README.md).
+La météo des champignons, forêt par forêt : accueil, carte à 25 m, Guide, soutien. Pages statiques sans build ; le détail des pages est dans [`docs/web.md`](docs/web.md).
 
 | Dépôt | Contenu |
 | --- | --- |

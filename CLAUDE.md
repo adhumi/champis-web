@@ -12,6 +12,7 @@ web/tests/    pytest qui pilote node ; referential.py et pngtiles.py remplacent 
 champis/      sous-module adhumi/champis : shared/ (palette, textes), species/
 shared, species   liens vers champis/ pour le serveur local ; le Dockerfile copie les vrais dossiers
 Caddyfile     pages de web/ à la racine (/, /carte.html… ; les anciennes adresses /web/*.html y redirigent, les fichiers de /web/ restent servis), /shared/, /species/, /health ; tout le reste répond 404 (le relais vers l'API est retiré depuis le 13 nov. 2026)
+docs/         web.md : détail des pages et du code de web/ (hors de web/, donc non servi)
 scripts/      smoke.sh : contrôle d'un site qui tourne (CI sur l'image, `make smoke URL=…` après un déploiement)
 ```
 
