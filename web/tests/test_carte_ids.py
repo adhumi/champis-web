@@ -74,6 +74,23 @@ def test_no_third_party_cdn():
             assert (WEB / src).is_file(), src
 
 
+def test_maplibre_is_the_vendored_es_module():
+    """MapLibre GL JS 6 n'existe qu'en module ES : `maplibre.js` l'importe depuis `web/vendor/` et
+    le pose en global ; carte.html le charge avant ses scripts, tous différés pour s'exécuter après
+    lui. Le worker est le fichier voisin du module, que MapLibre charge par son adresse."""
+    shim = (WEB / "maplibre.js").read_text(encoding="utf-8")
+    (module,) = re.findall(r'from "\./(vendor/[^"]+)"', shim)
+    assert (WEB / module).is_file(), module
+    assert (WEB / module).with_name("maplibre-gl-worker.mjs").is_file()
+    assert "globalThis.maplibregl = maplibregl" in shim
+    html = (WEB / "carte.html").read_text(encoding="utf-8")
+    scripts = re.findall(r"<script([^>]*)>", html)
+    assert 'type="module" src="maplibre.js"' in scripts[0]
+    assert all(" defer " in s for s in scripts[1:]), scripts
+    # la feuille de style vient du même dossier versionné que le module
+    assert f'href="{module.rsplit("/", 1)[0]}/maplibre-gl.css"' in html
+
+
 def test_home_page_carries_the_promise_and_keeps_old_map_links():
     """Étape C, lot C3 : l'accueil porte l'accroche décidée et la promesse, mène à la carte, et
     renvoie toujours vers la carte les anciens liens (`index.html#11/47/6`, `?tiles=…`)."""

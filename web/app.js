@@ -385,7 +385,7 @@ const encodePng = async (canvas) => (await canvas.convertToBlob({ type: "image/p
 
 if (typeof maplibregl === "undefined" || typeof pmtiles === "undefined") {
   $("weather-status").textContent = "La carte ne s'est pas chargée : vérifiez la connexion puis rechargez la page.";
-  throw new Error("MapLibre ou PMTiles absent (CDN injoignable)");
+  throw new Error("MapLibre ou PMTiles absent (web/vendor/ injoignable)");
 }
 
 maplibregl.addProtocol("champis", async (params) => {

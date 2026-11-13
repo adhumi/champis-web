@@ -27,7 +27,7 @@ Ce qui part chez l'IGN est dit dans `shared/texts/confidentialite.md`.
 
 ## Aucun tiers non nécessaire (étape C, lot C1)
 
-MapLibre GL 4.7.1 et PMTiles 3.2.1 sont servis par Champis depuis `web/vendor/` (provenance, licences et empreintes npm dans `web/vendor/README.md`). Le navigateur ne contacte plus que Champis, la Géoplateforme de l'IGN (fond Plan IGN, recherche, forêts publiques) et, si on le choisit, OpenStreetMap ; `confidentialite.md` le dit. Mentions légales : `shared/texts/mentions-legales.md`, en lien dans le pied de chaque page.
+MapLibre GL 6.18.0 (module ES, posé en global par `maplibre.js`) et PMTiles 3.2.1 sont servis par Champis depuis `web/vendor/` (provenance, licences et empreintes npm dans `web/vendor/README.md`). Le navigateur ne contacte plus que Champis, la Géoplateforme de l'IGN (fond Plan IGN, recherche, forêts publiques) et, si on le choisit, OpenStreetMap ; `confidentialite.md` le dit. Mentions légales : `shared/texts/mentions-legales.md`, en lien dans le pied de chaque page.
 
 ## Lancer
 

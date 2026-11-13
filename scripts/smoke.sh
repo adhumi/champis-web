@@ -47,6 +47,15 @@ check /admin/ 404
 body=$(curl -sS "$BASE/health")
 [ "$body" = "ok" ] || { echo "ECHEC   /health répond « $body » au lieu de « ok »"; FAIL=1; }
 
+# MapLibre est un module ES : un navigateur refuse un module servi sans type JavaScript
+for path in /maplibre.js /vendor/maplibre-gl-6.18.0/maplibre-gl.mjs /vendor/maplibre-gl-6.18.0/maplibre-gl-worker.mjs; do
+	ctype=$(curl -sS -o /dev/null -w '%{http_code} %{content_type}' "$BASE$path" || echo "erreur")
+	case "$ctype" in
+		"200 text/javascript"*|"200 application/javascript"*) echo "ok      $path ($ctype)" ;;
+		*) echo "ECHEC   $path : module attendu en JavaScript, obtenu « $ctype »"; FAIL=1 ;;
+	esac
+done
+
 for path in /vendor/README.md /web/vendor/README.md; do
 	cache=$(curl -sS -o /dev/null -D - "$BASE$path" | tr -d '\r' | grep -i '^cache-control:' || true)
 	case "$cache" in
