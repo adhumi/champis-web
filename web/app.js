@@ -56,7 +56,13 @@ let catalogIds = null;
 // ont un canal dans un G, une seule tuile G est lue pour elles (2 requêtes Range par tuile avec A,
 // au lieu de 5 pour les cèpes) ; sinon, repli sur les T. La page marche dans les deux cas.
 const groups = new Map();
-let altLayer = null; // PMTiles A (classes d'altitude) : { pm, label }, commun à toutes les espèces
+// PMTiles d'altitude, commun à toutes les espèces : { pm, label, fine }. La couche E (altitude par
+// pas de 20 m, `fine`) est préférée à la couche A (classes de 300 m) : elle permet d'interpoler
+// M_eff × Φ entre deux classes au lieu de sauter de l'une à l'autre (spec › Scoring ›
+// Interpolation entre classes d'altitude, 13 nov. 2026).
+let altLayer = null;
+/** Encodage de la couche d'altitude chargée (celui de A sans couche). */
+const altEnc = () => (altLayer?.fine ? palette.elev_encoding : palette.alt_encoding);
 let currentKey = null; // "s:<id>" ou "g:<group>"
 let tileVersion = 0; // incrémenté pour forcer le rendu quand la météo ou le jour change
 const transparentTile = makeTransparentTile();
@@ -166,10 +172,10 @@ async function decodeT(buf) {
   return out;
 }
 
-/** PNG de la couche A → indice de classe par pixel (nodata de la palette si inconnu). */
+/** PNG de la couche A ou E → indice (classe ou tranche) par pixel, nodata de son encodage si inconnu. */
 async function decodeAlt(buf) {
   const { v, a } = await pngPixels(buf);
-  const { nodata } = palette.alt_encoding;
+  const { nodata } = altEnc();
   const out = new Uint8Array(TILE * TILE);
   for (let i = 0; i < out.length; i++) out[i] = a[i] === 0 ? nodata : v[i];
   return out;
@@ -309,6 +315,7 @@ function combine(arrays, z, x, y, alt) {
   const block = Field.blockPx(z);
   const blocks = TILE / block;
   const samples = Field.tileSamples(weather.index, z, x, y, TILE, block);
+  const enc = altEnc();
   for (const { sid, t } of arrays) {
     const memo = new Map(); // cellule → Map(classe → facteur)
     let k = null;
@@ -317,7 +324,7 @@ function combine(arrays, z, x, y, alt) {
       if (!byClass) memo.set(cell, (byClass = new Map()));
       let f = byClass.get(k);
       if (f === undefined) {
-        f = Field.factor(cell, sid, date, Field.altCenter(cell, k, palette.alt_encoding));
+        f = Field.cellFactor(cell, sid, date, k, enc);
         byClass.set(k, f);
       }
       return f;
@@ -352,7 +359,7 @@ function combine(arrays, z, x, y, alt) {
 /** M_eff × Φ de l'espèce, interpolé au point, pour un jour et un indice de classe d'altitude
  *  (null = inconnu). */
 function weatherFactor(sid, lat, lon, k, date = currentDate()) {
-  return Field.pointFactor(weather.index, sid, date, lat, lon, k, palette.alt_encoding);
+  return Field.pointFactor(weather.index, sid, date, lat, lon, k, altEnc());
 }
 
 /** Le jour de la carte : toujours aujourd'hui (`today` de l'API), null avant la première réponse. */
@@ -806,12 +813,16 @@ async function dropChannelOrder(group, part) {
 
 /** `info` (manifeste) : { kind: "G", group, species, part? } ; sans `info`, tout vient du nom. */
 async function addSource(src, label, info = null) {
-  if (/(?:^|\/)A-\d+m-/.test(label)) {
+  const altKind = /(?:^|\/)([AE])-\d+m-/.exec(label)?.[1];
+  if (altKind) {
+    const fine = altKind === "E";
+    // E sans son encodage dans la palette (référentiel ancien), ou A alors que E est déjà là : ignoré
+    if ((fine && !palette.elev_encoding) || (!fine && altLayer?.fine)) return altKind;
     const pm = new pmtiles.PMTiles(src);
     await pm.getHeader(); // échoue tout de suite (CORS, 403…) plutôt qu'au premier rendu
-    altLayer = { pm, label };
+    altLayer = { pm, label, fine };
     ++tileVersion;
-    return "A";
+    return altKind;
   }
   const g = info?.kind === "G" ? { group: info.group, part: info.part ?? 1 } : Groups.parseName(label);
   if (g) {
@@ -865,7 +876,9 @@ async function addMany(items) {
     groups.size > 0
       ? `Fichiers G : ${[...groups.values()].map((g) => `${g.id} (${nCanaux(g.species.length)})`).join(", ")} — lus à la place des T de leurs espèces`
       : "Sans fichier G : une lecture T par espèce",
-    altLayer
+    altLayer?.fine
+      ? "Altitude : couche E chargée (gel et phénologie interpolés à l'altitude du pixel)"
+      : altLayer
       ? "Classes d'altitude : couche A chargée (gel et phénologie par pixel)"
       : "Sans couche A : classe d'altitude = altitude médiane de la cellule météo",
     ...errors,
@@ -894,7 +907,7 @@ function loadFromQuery() {
 /** Ligne du mode dev sous la couche : ce que la couche courante lit (« G cepes (4 canaux) + A »). */
 function noteReadPlan() {
   if (!DEV || !currentKey) return;
-  const line = `Lecture : ${readPlanText(currentKey)}${altLayer ? " + A" : ""}`;
+  const line = `Lecture : ${readPlanText(currentKey)}${altLayer ? (altLayer.fine ? " + E" : " + A") : ""}`;
   const st = $("status");
   st.textContent = /^Lecture : /m.test(st.textContent) ? st.textContent.replace(/^Lecture : .*$/m, line) : `${st.textContent}\n${line}`;
 }
@@ -924,7 +937,7 @@ async function loadFromApi() {
   // T (une espèce), G (un groupe, ses espèces dans l'ordre des canaux : `species` du manifeste,
   // jamais deviné) et A du même jeu ; tout kind inconnu est ignoré sans compter comme une erreur.
   // Les T restent chargés même avec les G : repli et espèces hors groupe.
-  const tiles = body.tiles.filter((t) => t.depts_hash === dh && ["T", "G", "A"].includes(t.kind));
+  const tiles = body.tiles.filter((t) => t.depts_hash === dh && ["T", "G", "A", "E"].includes(t.kind));
   const items = tiles
     .filter((t) => t.kind !== "G" || (Array.isArray(t.species) && t.species.length > 0))
     .map((t) => ({
@@ -940,7 +953,7 @@ async function loadFromApi() {
   const count = (k) => tiles.filter((t) => t.kind === k).length;
   const nDepts = body.depts_by_hash?.[dh]?.length;
   const jeu = nDepts ? `jeu d${dh} (${nDepts} département${nDepts > 1 ? "s" : ""})` : `jeu d${dh}`;
-  const kinds = [`${count("T")} T`, `${count("G")} G`, count("A") ? "A" : "sans A"].join(", ");
+  const kinds = [`${count("T")} T`, `${count("G")} G`, count("E") ? "E" : count("A") ? "A" : "sans A"].join(", ");
   $("status").textContent +=
     `\n${loaded}/${items.length} fichier(s) chargés depuis le bucket (${body.mode}), ${jeu} : ${kinds}${hint}`;
   noteReadPlan();
@@ -1091,7 +1104,7 @@ map.on("click", async (e) => {
     return;
   }
   const name = species.get(best.sid)?.names.fr ?? best.sid;
-  const { nodata } = palette.alt_encoding;
+  const { nodata } = altEnc();
   // statut de la forêt en parallèle : la fiche s'affiche sans l'attendre et le gagne à son arrivée
   let shown = null;
   let forest = null;
@@ -1108,7 +1121,7 @@ map.on("click", async (e) => {
   // que le score est interpolé entre les cellules voisines, comme la couleur de la carte
   const cell = Field.sample(weather.index, e.lngLat.lat, e.lngLat.lng).home;
   const w = best.v / best.T;
-  const altKey = String(Field.altCenter(cell, altIdx, palette.alt_encoding));
+  const altKey = String(Field.altCenter(cell, altIdx, altEnc()));
   const altTxt = altLayer && altIdx !== null && altIdx !== nodata ? "" : " (médiane cellule)";
   show({ value: best.v, name, phrases: [terrainPhrase(best.T), "météo : chargement…"], details: "…" });
   const tBySid = Object.fromEntries(arrays.filter(({ t }) => !Number.isNaN(t[i])).map(({ sid, t }) => [sid, t[i]]));
@@ -1127,7 +1140,8 @@ map.on("click", async (e) => {
     days: body ? pointDays(body, tBySid, altKey, e.lngLat.lat, e.lngLat.lng, altIdx) : null,
     details:
       `S = ${best.v.toFixed(3)} · T ${best.T.toFixed(2)} × M_eff·Φ ${w.toFixed(2)} (interpolé entre cellules voisines)` +
-      ` · classe ${altKey} m${altTxt}${cell.stale ? " · météo périmée" : ""}\n` +
+      ` · ${altLayer?.fine && altIdx !== null && altIdx !== nodata ? `altitude ${Field.elevation(altIdx, altEnc().step_m)} m, entre classes` : `classe ${altKey} m${altTxt}`}` +
+      `${cell.stale ? " · météo périmée" : ""}\n` +
       `Facteurs de la cellule ${cell.id} : ${factorsTxt}`,
   });
 });
