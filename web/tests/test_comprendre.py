@@ -153,12 +153,12 @@ def test_species_sheet_never_links_a_photo_page_that_is_not_https(page):
 
 def test_species_sheet_links_an_https_photo_page_and_escapes_everything():
     photo = {
-        "url": "https://x.test/a.jpg",
+        "url": "https://upload.wikimedia.org/a.jpg",
         "page": 'https://commons.wikimedia.org/wiki/File:X.jpg?a=1&b="2"',
         "author": "Auteur",
         "license": "CC BY-SA 4.0",
     }
-    (html,) = call(("speciesSheet", [species(HOSTILE_ID, photo=photo)]))
+    (html,) = call(("speciesSheet", [species("boletus_edulis", photo=photo)]))
     assert_inert(html)
     credit = [attrs for tag, attrs in tags(html) if tag == "a"][1]
     assert credit == {"href": photo["page"], "rel": "noopener"}
@@ -166,6 +166,32 @@ def test_species_sheet_links_an_https_photo_page_and_escapes_everything():
     assert "Cèpe &lt;b&gt;de&lt;/b&gt; Bordeaux" in html
     assert "Bolet &lt;amer&gt;" in html and "Une &lt;source&gt;" in html
     assert "<script" not in html and "<b>" not in html
+
+
+def test_species_sheet_photo_comes_from_the_referential_never_from_wikimedia():
+    """Décision du 13 nov. 2026 : la photo est `shared/photos/<id>.jpg`, servie par le site comme
+    les planches ; `about.photo.url` n'est plus une source d'image, seul le crédit reste."""
+    photo = {
+        "url": "https://upload.wikimedia.org/wikipedia/commons/a/a9/X.jpg",
+        "page": "https://commons.wikimedia.org/wiki/File:X.jpg",
+        "author": "Auteur",
+        "license": "CC BY-SA 4.0",
+    }
+    sheet, hostile = call(
+        ("speciesSheet", [species("boletus_edulis", photo=photo)]),
+        ("speciesSheet", [species(HOSTILE_ID, photo=photo)]),
+    )
+    images = [attrs for tag, attrs in tags(sheet) if tag == "img"]
+    assert images == [
+        {"src": "../shared/photos/boletus_edulis.jpg", "alt": "Photo : Cèpe <b>de</b> Bordeaux"}
+    ]
+    assert "upload.wikimedia.org" not in sheet
+    # pas de gestionnaire en ligne (CSP) : le repli « Photo à venir » est posé par script
+    assert "onerror" not in sheet
+    # un identifiant qui n'a pas la forme d'un identifiant d'espèce n'entre pas dans un chemin
+    assert_inert(hostile)
+    assert "<img" not in hostile and "Photo à venir" in hostile
+    assert call(("PHOTO_PLACEHOLDER", []))[0] in hostile
 
 
 def test_species_sheet_without_about_or_photo():

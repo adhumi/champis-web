@@ -33,6 +33,8 @@
     ).join("");
   }
 
+  const photoSrc = (id) => `../shared/photos/${idParam(id)}.jpg`;
+  const PHOTO_PLACEHOLDER = `<div class="photo"><div class="placeholder">Photo à venir</div></div>`;
   /** Crédit d'une photo : auteur, licence, Wikimedia Commons ; en lien si `page` est en https. */
   function photoCredit(photo) {
     const text = `${Site.esc(photo.author)} · ${Site.esc(photo.license)} · Wikimedia Commons`;
@@ -45,10 +47,13 @@
     const name = sp.names?.fr ?? sp.id;
     let html = `<p class="back"><a href="comprendre.html?article=especes">← Les espèces</a></p><h1>${Site.esc(name)}</h1><p class="muted"><em>${Site.esc(sp.names?.la ?? "")}</em></p>`;
     if (!about) return html + `<p class="muted">Fiche à venir.</p>`;
-    html += about.photo
-      ? `<figure class="photo"><img src="${Site.esc(about.photo.url)}" alt="Photo : ${Site.esc(name)}" loading="lazy" />` +
+    // La photo est celle du référentiel (shared/photos/<id>.jpg, servie par le site comme les
+    // planches de shared/illustrations/) : `about.photo.url` n'est plus lu, plus aucune requête ne
+    // part vers Wikimedia. Le crédit reste, avec son lien vers la page de l'image.
+    html += about.photo && Site.isSpeciesId(sp.id)
+      ? `<figure class="photo"><img src="${photoSrc(sp.id)}" alt="Photo : ${Site.esc(name)}" />` +
         `<figcaption>${photoCredit(about.photo)}</figcaption></figure>`
-      : `<div class="photo"><div class="placeholder">Photo à venir</div></div>`;
+      : PHOTO_PLACEHOLDER;
     html += `<p>${Site.esc(about.summary)}</p><h2>Où</h2><p>${Site.esc(about.habitat)}</p><h2>Quand</h2><p>${Site.esc(about.season)}</p>`;
     html += `<h2>Ne pas confondre avec</h2>` + about.confusions.map((c) =>
       `<div class="confusion"><h3>${Site.esc(c.name)} <em>${Site.esc(c.latin)}</em></h3><p>${Site.esc(c.risk)}</p><p class="muted">${Site.esc(c.tell)}</p></div>`
@@ -61,7 +66,7 @@
     return html + (Site.APP_LINE ? `<p class="app-line">${Site.esc(Site.APP_LINE)}</p>` : "");
   }
 
-  const Guide = { articlesNav, speciesList, speciesSheet, photoCredit };
+  const Guide = { articlesNav, speciesList, speciesSheet, photoCredit, PHOTO_PLACEHOLDER };
   root.Guide = Guide;
   if (typeof module !== "undefined" && module.exports) module.exports = Guide;
   if (typeof document === "undefined") return;
@@ -93,6 +98,17 @@
     }
   }
 
+  /** Une photo qui ne se charge pas (absente du référentiel servi) laisse la place au bloc « Photo
+   *  à venir ». L'écouteur est posé ici : la CSP du site interdit les gestionnaires en ligne. */
+  function watchPhoto(container) {
+    const img = container.querySelector("figure.photo img");
+    if (!img) return;
+    const fallback = () => (img.closest("figure").outerHTML = PHOTO_PLACEHOLDER);
+    img.addEventListener("error", fallback, { once: true });
+    // l'image a pu échouer avant la pose de l'écouteur (réponse en cache)
+    if (img.complete && img.naturalWidth === 0) fallback();
+  }
+
   (async () => {
     try {
       const articles = await loadIndex();
@@ -104,6 +120,7 @@
         const species = await loadSpecies();
         const sp = species && Object.hasOwn(species, speciesId) ? species[speciesId] : null;
         $("content").innerHTML = sp ? speciesSheet(sp) : `<p class="muted">Espèce inconnue.</p>`;
+        watchPhoto($("content"));
         return;
       }
       let html = `<h1>${Site.esc(article.title)}</h1>` + (md ? Site.renderMarkdown(md) : `<p class="muted">Texte indisponible.</p>`);
