@@ -385,3 +385,56 @@ def test_tile_samples_one_per_block():
     assert len(samples) == 256 and all(s is not None for s in samples)
     assert all(abs(sum(s["weights"]) - 1) < 1e-9 for s in samples if s["weights"])
     assert all(s is None for s in empty)
+
+
+# ---------------------------------------------------------------- interpolation entre classes d'altitude
+
+ALT_VECTORS = json.loads((REFERENTIAL / "shared" / "vectors" / "alt.json").read_text("utf-8"))
+ELEV = {"step_m": 20, "nodata": 255}
+
+
+def test_alt_vectors():
+    """Parité avec `interp.between_classes` (champis-api) : altitude de la tranche, valeur."""
+    cases = ALT_VECTORS["cases"]
+    assert len(cases) >= 50
+    calls = []
+    for c in cases:
+        centers = sorted(float(k) for k in c["values"])
+        values = [c["values"][str(int(k))] for k in centers]
+        calls.append(("elevation", [c["index"], c["step_m"]]))
+        calls.append(("betweenClasses", [c["expected"]["alt_m"], centers, values]))
+    out = run(*calls)
+    for c, alt, value in zip(cases, out[0::2], out[1::2], strict=True):
+        assert alt == c["expected"]["alt_m"], c
+        if c["expected"]["value"] is None:
+            assert value is None, c
+        else:
+            assert value == pytest.approx(c["expected"]["value"], abs=1e-6), c
+
+
+def test_cell_factor_reads_altitude_from_the_fine_layer_or_the_class():
+    cell = {
+        "id": "c_0950_6670",
+        "lat": 47.12,
+        "lon": 6.32,
+        "elevation_m": 500,
+        "alt_classes": [450.0, 750.0, 1050.0],
+        "f": {"e": {"d": [0.8, 0.5, None]}},
+    }
+    fine_mid, fine_centre, fine_low, fine_unknown, coarse, other_day = run(
+        ("cellFactor", [cell, "e", "d", 29, ELEV]),  # 590 m : entre 450 et 750
+        ("cellFactor", [cell, "e", "d", 22, ELEV]),  # 450 m : le centre de la classe
+        ("cellFactor", [cell, "e", "d", 3, ELEV]),  # 70 m : à plat sous la première classe
+        ("cellFactor", [cell, "e", "d", 255, ELEV]),  # inconnu : classe de l'altitude médiane
+        ("cellFactor", [cell, "e", "d", 2, ALT]),  # couche A, classe 750
+        ("cellFactor", [cell, "e", "x", 29, ELEV]),
+    )
+    assert fine_mid == pytest.approx(0.8 + (590 - 450) / 300 * (0.5 - 0.8))
+    assert fine_centre == pytest.approx(0.8) and fine_low == pytest.approx(0.8)
+    assert fine_unknown == pytest.approx(0.8)
+    assert coarse == pytest.approx(0.5)
+    assert other_day is None
+    # la classe 1050 n'a pas de valeur : à plat au-dessus de 750
+    assert run(("cellFactor", [cell, "e", "d", 60, ELEV])) == [pytest.approx(0.5)]
+    # classe utilisée pour les phrases : la plus proche de l'altitude du pixel
+    assert run(("altCenter", [cell, 29, ELEV]), ("altCenter", [cell, 31, ELEV])) == [450.0, 750.0]

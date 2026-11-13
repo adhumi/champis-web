@@ -285,11 +285,11 @@
     return num / den;
   }
 
-  /** M_eff × Φ interpolé en un point pour une espèce, un jour et l'indice de classe d'altitude
-   *  du pixel : chaque cellule donne sa valeur pour sa classe la plus proche. null sans météo. */
+  /** M_eff × Φ interpolé en un point pour une espèce, un jour et l'indice d'altitude du pixel :
+   *  chaque cellule donne sa valeur à cette altitude (`cellFactor`). null sans météo. */
   function pointFactor(index, sid, date, lat, lon, k, altEncoding) {
     const s = sample(index, lat, lon);
-    return s ? sampleFactor(s, (c) => factor(c, sid, date, altCenter(c, k, altEncoding))) : null;
+    return s ? sampleFactor(s, (c) => cellFactor(c, sid, date, k, altEncoding)) : null;
   }
 
   // ------------------------------------------------------------ tuiles et facteur
@@ -316,14 +316,47 @@
     return out;
   }
 
+  /** L'encodage est-il celui de la couche E (altitude fine, `step_m`) plutôt que celui de la
+   *  couche A (classes, `class_m`) ? */
+  const isFine = (altEncoding) => altEncoding.step_m !== undefined;
+  const unknownIndex = (k, altEncoding) => k === null || k === undefined || k === altEncoding.nodata;
+
+  /** Altitude (m) au milieu de la tranche d'indice `index` de la couche E. */
+  const elevation = (index, stepM) => (index + 0.5) * stepM;
+
   /** Centre (m) de la classe d'altitude à utiliser parmi celles que l'API a calculées pour la
-   *  cellule : celle du pixel (indice k de la couche A) ; sans couche A ou altitude inconnue,
-   *  celle de l'altitude médiane de la forêt de la cellule (`elevation_m`). */
+   *  cellule : celle du pixel (indice k de la couche A, ou classe la plus proche de son altitude
+   *  lue dans la couche E) ; sans couche ou altitude inconnue, celle de l'altitude médiane de la
+   *  forêt de la cellule (`elevation_m`). */
   function altCenter(cell, k, altEncoding) {
-    const { class_m, nodata } = altEncoding;
-    const alt = k === null || k === undefined || k === nodata ? cell.elevation_m : (k + 0.5) * class_m;
-    const target = Math.floor(alt / class_m) * class_m + class_m / 2;
+    let target;
+    if (unknownIndex(k, altEncoding)) {
+      target = cell.elevation_m;
+    } else if (isFine(altEncoding)) {
+      target = elevation(k, altEncoding.step_m);
+    } else {
+      target = (k + 0.5) * altEncoding.class_m;
+    }
     return cell.alt_classes.reduce((a, b) => (Math.abs(b - target) < Math.abs(a - target) ? b : a));
+  }
+
+  /** Valeur à l'altitude `altM` d'une cellule dont `values[i]` est M_eff × Φ au centre
+   *  `centers[i]` (croissants) : linéaire entre les deux centres qui encadrent l'altitude, à plat
+   *  en dessous du premier et au-dessus du dernier ; une classe sans valeur (null) est ignorée,
+   *  null si aucune n'en a. Portage de `interp.between_classes` (champis-api), rejoué contre
+   *  shared/vectors/alt.json (spec › Scoring › Interpolation entre classes d'altitude). */
+  function betweenClasses(altM, centers, values) {
+    let c0 = null;
+    let v0 = null;
+    for (let i = 0; i < centers.length; i++) {
+      const v = values?.[i];
+      if (v === null || v === undefined) continue;
+      const c = centers[i];
+      if (altM <= c) return c0 === null ? v : v0 + ((altM - c0) / (c - c0)) * (v - v0);
+      c0 = c;
+      v0 = v;
+    }
+    return v0;
   }
 
   /** M_eff × Φ de la cellule pour l'espèce, le jour et le centre de classe ; null si inconnu
@@ -334,12 +367,22 @@
     return cell.f[sid]?.[date]?.[i] ?? null;
   }
 
+  /** M_eff × Φ de la cellule pour l'espèce, le jour et l'indice `k` lu dans la couche
+   *  d'altitude : avec la couche E, interpolé entre les deux classes de la cellule qui encadrent
+   *  l'altitude du pixel ; avec la couche A (ou sans altitude), celui de sa classe. */
+  function cellFactor(cell, sid, date, k, altEncoding) {
+    if (isFine(altEncoding) && !unknownIndex(k, altEncoding)) {
+      return betweenClasses(elevation(k, altEncoding.step_m), cell.alt_classes, cell.f[sid]?.[date]);
+    }
+    return factor(cell, sid, date, altCenter(cell, k, altEncoding));
+  }
+
   const Field = {
     FIELD_ZOOM, MAX_CELL_KM, KM_PER_DEG, BIN_DEG, BLOCK_PX,
     weatherSource, blockPx, localToday, covers,
     mergeBbox, mergeField, buildIndex, nearestCell,
     lambert93, corners, interpolate, sample, sampleFactor, pointFactor,
-    tilePixelToLngLat, tileSamples, altCenter, factor,
+    tilePixelToLngLat, tileSamples, altCenter, factor, cellFactor, betweenClasses, elevation,
   };
   root.Field = Field;
   if (typeof module !== "undefined" && module.exports) module.exports = Field;
