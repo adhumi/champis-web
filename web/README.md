@@ -29,6 +29,10 @@ Ce qui part chez l'IGN est dit dans `shared/texts/confidentialite.md`.
 
 MapLibre GL 6.18.0 (module ES, posé en global par `maplibre.js`) et PMTiles 3.2.1 sont servis par Champis depuis `web/vendor/` (provenance, licences et empreintes npm dans `web/vendor/README.md`). Le navigateur ne contacte plus que Champis, la Géoplateforme de l'IGN (fond Plan IGN, recherche, forêts publiques) et, si on le choisit, OpenStreetMap ; `confidentialite.md` le dit. Mentions légales : `shared/texts/mentions-legales.md`, en lien dans le pied de chaque page.
 
+## En-têtes de sécurité (13 nov. 2026)
+
+Le `Caddyfile` pose sur toute réponse `Strict-Transport-Security`, `Permissions-Policy: geolocation=(self)` et une CSP : scripts et worker de la même origine seulement (aucun script en ligne : ceux de l'accueil et de Soutenir sont `anciens-liens.js`, `index.js` et `soutenir.js`), images locales, `data:` et `blob:`, et pour `fetch` les trois hôtes que le code joint : `api.champis.app` (météo, catalogue, manifeste et tuiles PMTiles relayées par `/tiles/<nom>`), `data.geopf.fr` et `tile.openstreetmap.org` (MapLibre lit les fonds de carte par `fetch`). Si l'API repasse en URL présignées (`CHAMPIS_TILES_MODE=presign`), l'hôte du bucket s'ajoute à `connect-src`. `make serve` (serveur Python) n'envoie pas ces en-têtes.
+
 ## Lancer
 
 ```bash

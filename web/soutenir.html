@@ -28,13 +28,6 @@
   <nav id="site-tabs" aria-label="Pages"></nav>
   <footer class="site-footer"></footer>
   <script src="site.js"></script>
-  <script>
-    Site.renderNav("soutenir.html");
-    Site.loadPalette().catch(() => {});
-    if (Site.SUPPORT_URL) {
-      document.getElementById("support-action").innerHTML =
-        `<a class="button" href="${Site.esc(Site.SUPPORT_URL)}" rel="noopener">Faire un don</a> <span class="small muted">Paiement sécurisé, montant libre, sans compte Champis.</span>`;
-    }
-  </script>
+  <script src="soutenir.js"></script>
 </body>
 </html>

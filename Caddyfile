@@ -9,9 +9,25 @@
 }
 
 :{$PORT:8080} {
+	# En-têtes de sécurité, sur toute réponse (13 nov. 2026). La CSP n'ouvre que ce que le code
+	# joint (web/tests/test_carte_ids.py compare ses hôtes à ceux de site.js et app.js) :
+	# - script-src et worker-src 'self' : aucun script en ligne, MapLibre (module ES) et son worker
+	#   viennent de /vendor/, par leur adresse (pas de blob:, pas d'eval) ;
+	# - style-src 'unsafe-inline' : blocs <style> des pages et attributs style du rendu (légende,
+	#   pastilles) ;
+	# - img-src data: (icônes des commandes de MapLibre, dans sa feuille de style) et blob: (repli
+	#   de MapLibre pour décoder une tuile là où createImageBitmap manque) ; les fonds de carte
+	#   sont lus par fetch, donc par connect-src ;
+	# - connect-src : l'API (météo, catalogue, manifeste et tuiles PMTiles, relayées par
+	#   /tiles/<nom> : CHAMPIS_TILES_MODE=proxy), la Géoplateforme de l'IGN (fonds Plan IGN et
+	#   photo aérienne, recherche de commune, forêts publiques) et OpenStreetMap (fond au choix).
+	#   Si l'API repasse en URL présignées, ajouter ici l'hôte du bucket.
 	header {
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Permissions-Policy "geolocation=(self)"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.champis.app https://data.geopf.fr https://tile.openstreetmap.org; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 		-Server
 	}
 

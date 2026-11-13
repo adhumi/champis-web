@@ -91,6 +91,53 @@ def test_maplibre_is_the_vendored_es_module():
     assert f'href="{module.rsplit("/", 1)[0]}/maplibre-gl.css"' in html
 
 
+@pytest.mark.parametrize("page", sorted(p.name for p in WEB.glob("*.html")))
+def test_no_inline_script_nor_inline_handler(page: str):
+    """La CSP du site (`script-src 'self'`, Caddyfile) refuse tout script en ligne : chaque balise
+    `<script>` a un `src` local, aucun attribut `on…=`, aucun lien `javascript:`."""
+    html = (WEB / page).read_text(encoding="utf-8")
+    for attrs, body in re.findall(r"<script([^>]*)>(.*?)</script>", html, re.S):
+        src = re.search(r'src="([^"]+)"', attrs)
+        assert src and body.strip() == "", (page, attrs, body[:60])
+        assert not re.match(r"^(?:[a-z]+:)?//", src.group(1)), src.group(1)
+        assert (WEB / src.group(1)).is_file(), src.group(1)
+    assert not re.search(r"<[^>]+\son[a-z]+\s*=", html), page
+    assert "javascript:" not in html
+
+
+def test_the_caddyfile_sends_the_security_headers():
+    """En-têtes du 13 nov. 2026 : HSTS, Permissions-Policy (la géolocalisation pour « me
+    localiser », rien d'autre) et une CSP dont les seuls hôtes tiers sont ceux que le code joint :
+    l'API, la Géoplateforme de l'IGN et OpenStreetMap."""
+    caddy = (WEB.parent / "Caddyfile").read_text(encoding="utf-8")
+    assert 'Strict-Transport-Security "max-age=31536000; includeSubDomains"' in caddy
+    assert 'Permissions-Policy "geolocation=(self)"' in caddy
+    (csp,) = re.findall(r'Content-Security-Policy "([^"]+)"', caddy)
+    policy = {d.split()[0]: d.split()[1:] for d in csp.split(";") if d.strip()}
+    assert policy["default-src"] == ["'self'"]
+    assert policy["script-src"] == ["'self'"]
+    assert policy["worker-src"] == ["'self'"]
+    assert policy["object-src"] == policy["frame-ancestors"] == ["'none'"]
+    assert policy["base-uri"] == policy["form-action"] == ["'self'"]
+    hosts = {h for values in policy.values() for h in values if h.startswith("http")}
+    site = (WEB / "site.js").read_text(encoding="utf-8")
+    app = (WEB / "app.js").read_text(encoding="utf-8")
+    called = set(re.findall(r'"(https://[a-z0-9.-]+)', site + app))
+    assert (
+        hosts
+        == called
+        == {
+            "https://api.champis.app",
+            "https://data.geopf.fr",
+            "https://tile.openstreetmap.org",
+        }
+    )
+    assert set(policy["connect-src"]) == {"'self'"} | hosts
+    for values in policy.values():
+        assert "'unsafe-eval'" not in values and "*" not in values
+    assert "'unsafe-inline'" not in policy["script-src"]
+
+
 def test_home_page_carries_the_promise_and_keeps_old_map_links():
     """Étape C, lot C3 : l'accueil porte l'accroche décidée et la promesse, mène à la carte, et
     renvoie toujours vers la carte les anciens liens (`index.html#11/47/6`, `?tiles=…`)."""
@@ -102,7 +149,9 @@ def test_home_page_carries_the_promise_and_keeps_old_map_links():
     )
     assert 'href="carte.html"' in html
     assert 'name="robots" content="noindex"' in html
-    assert 'location.replace("carte.html" + location.search + location.hash)' in html
+    redirect = (WEB / "anciens-liens.js").read_text(encoding="utf-8")
+    assert '<script src="anciens-liens.js"></script>' in html.split("</head>")[0]
+    assert 'location.replace("carte.html" + location.search + location.hash)' in redirect
     for article in ("cueillir-sans-nuire", "donnees-et-sources", "confidentialite"):
         assert f"comprendre.html?article={article}" in html
 
