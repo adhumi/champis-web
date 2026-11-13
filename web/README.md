@@ -36,11 +36,11 @@ make setup                           # sous-module champis/ et environnement de 
 make serve                           # http://localhost:8080/web/ (liens shared et species vers champis/)
 ```
 
-Les pages appellent l'API à `Site.apiBase` : `https://api.champis.app` en production ; en local, l'API de `make serve` dans champis-api sur le port 8000 ; `?api=…` l'emporte toujours.
+Les pages appellent l'API à `Site.apiBase` : `https://api.champis.app` en production ; en local, l'API de `make serve` dans champis-api sur le port 8000, ou celle de `?api=…`. Hors d'un poste local (`localhost`, `127.0.0.1`, `[::1]`), `?api=` et `?tiles=` sont ignorés : un lien vers `champis.app` ne change pas la source des données.
 
 ## Mode développement : `?dev=1`
 
-Sur la carte, `?dev=1` affiche l'adresse de l'API, le glisser-déposer de fichiers PMTiles (`data/tiles/T-*.pmtiles`, `G-*.pmtiles` et le `A-300m-*.pmtiles`, l'espèce ou le groupe est déduit du nom ; pour un G, l'ordre des canaux est celui du pipeline, les espèces du groupe triées par identifiant d'après `GET /species` ou, sans API, les T déjà glissés) et les diagnostics (fichiers chargés depuis le bucket, « jeu … : N T, M G, A », ce que la couche lit — « Lecture : G cepes (4 canaux) + A » —, nombre de cellules météo). Avec un serveur qui gère `Range`, les tuiles passent aussi en URL : `carte.html?tiles=../data/tiles/T-….pmtiles,…`.
+Sur la carte, `?dev=1` affiche l'adresse de l'API, le glisser-déposer de fichiers PMTiles (`data/tiles/T-*.pmtiles`, `G-*.pmtiles` et le `A-300m-*.pmtiles`, l'espèce ou le groupe est déduit du nom ; pour un G, l'ordre des canaux est celui du pipeline, les espèces du groupe triées par identifiant d'après `GET /species` ou, sans API, les T déjà glissés) et les diagnostics (fichiers chargés depuis le bucket, « jeu … : N T, M G, A », ce que la couche lit — « Lecture : G cepes (4 canaux) + A » —, nombre de cellules météo). Avec un serveur qui gère `Range`, les tuiles passent aussi en URL, sur un poste local seulement : `carte.html?tiles=../data/tiles/T-….pmtiles,…`.
 
 ## Score du jour (API)
 
@@ -59,7 +59,7 @@ Les deux réponses sont fusionnées par `field.js` dans la même structure de ce
 
 - `site.js` : fonctions pures partagées (dates en français sans locale, classes de la palette et couleur d'un pixel `pixelColor` validée par les vecteurs de parité, phrase de saison, Markdown, adresse de l'API) exportées pour node, plus la navigation, la légende, la ligne « Aujourd'hui · météo calculée à … » et les pastilles de la fiche côté navigateur. Testé par `web/tests/test_site.py`.
 - `app.js` : la carte (couche par espèce ou max du groupe, colorisation côté client, météo, ligne du jour, fiche en clair avec ses onze jours). `field.js` : fonctions pures de la météo de la carte (source selon le zoom, fusion bbox/field, index spatial, classe d'altitude et facteur d'un pixel), exportées pour node et testées par `web/tests/test_field.py`. `groups.js` : fonctions pures des PMTiles par groupe (séparation des canaux d'un G en T par espèce, plan de lecture d'une couche, ordre des canaux d'un G glissé-déposé), testées par `web/tests/test_groups.py`. `png.js` décode les PNG de données octet par octet, jamais par canvas (Safari trame les gris) ; testé par `web/tests/test_png_decoder.py`.
-- `comprendre.js` : le Guide.
+- `comprendre.js` : le Guide ; son rendu (liste des articles, liste et fiche des espèces) est fait de fonctions pures, testées par `web/tests/test_comprendre.py` avec des identifiants et des adresses hostiles.
 - Position de la carte dans l'URL (`#zoom/lat/lon`) pour partager une vue.
 
 ## Rendu des tuiles (étude du 4 nov. 2026)

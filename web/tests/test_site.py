@@ -137,20 +137,63 @@ def test_shared_texts_render_without_error():
 
 def test_api_base_and_dev_flag():
     """Découpage des dépôts (6 nov. 2026) : le site sur champis.app appelle api.champis.app ; en
-    local, l'API de `make serve` sur le port 8000 ; `?api=` l'emporte toujours."""
+    local, l'API de `make serve` sur le port 8000, ou celle de `?api=`, qui n'est lu que sur un
+    poste local (un lien vers champis.app ne doit pas pouvoir changer la source des données)."""
     page = {"hostname": "champis.app", "protocol": "https:", "origin": "https://champis.app"}
     local = {"hostname": "localhost", "protocol": "http:", "origin": "http://localhost:3000"}
-    prod, override, dev_api, dev, nodev = call(
+    prod, hostile, lookalike, override, dev_api, dev, nodev = call(
         ("apiBase", [{**page, "search": ""}]),
+        ("apiBase", [{**page, "search": "?api=https://x.test/"}]),
+        ("apiBase", [{**page, "hostname": "localhost.x.test", "search": "?api=https://x.test/"}]),
         ("apiBase", [{**local, "search": "?api=https://x.test/"}]),
         ("apiBase", [{**local, "search": ""}]),
         ("isDev", ["?dev=1&x=2"]),
         ("isDev", ["?x=2"]),
     )
     assert prod == "https://api.champis.app"
+    # hors d'un poste local, `?api=` est ignoré : un lien ne change pas la source des données
+    assert hostile == lookalike == "https://api.champis.app"
     assert override == "https://x.test"
     assert dev_api == "http://localhost:8000"
     assert (dev, nodev) == (True, False)
+    assert call(
+        ("isLocal", [page]), ("isLocal", [local]), ("isLocal", [{"hostname": "[::1]"}])
+    ) == [
+        False,
+        True,
+        True,
+    ]
+
+
+def test_palette_colours_and_species_ids_are_validated_before_use():
+    """Une couleur n'entre dans un attribut `style`, un identifiant dans un chemin, que bien formés."""
+    hostile = 'red"></i><img src=x onerror=alert(1)>'
+    assert call(
+        ("safeHex", ["#7A3FB0"]),
+        ("safeHex", ["#abc"]),
+        ("safeHex", ["#7A3FB0CC"]),
+        ("safeHex", [hostile]),
+        ("safeHex", ["#12"]),
+        ("safeHex", ["#7A3FB0;background:url(https://x.test)"]),
+        ("safeHex", [None]),
+    ) == [
+        "#7A3FB0",
+        "#abc",
+        "#7A3FB0CC",
+        "transparent",
+        "transparent",
+        "transparent",
+        "transparent",
+    ]
+    assert call(
+        ("isSpeciesId", ["boletus_edulis"]),
+        ("isSpeciesId", ["../../x"]),
+        ("isSpeciesId", ["Boletus"]),
+        ("isSpeciesId", [""]),
+        ("isSpeciesId", [None]),
+    ) == [True, False, False, False, False]
+    for hexa in [t["hex"] for t in load_palette()["thresholds"]] + [load_palette()["scale"]["hex"]]:
+        assert call(("safeHex", [hexa]))[0] == hexa
 
 
 def test_short_date_and_today_line_in_paris_time():

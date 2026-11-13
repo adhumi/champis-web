@@ -670,7 +670,7 @@ pickerList.addEventListener("keydown", (e) => {
 document.addEventListener("pointerdown", (e) => {
   if (!pickerList.hidden && !$("picker").contains(e.target)) openPicker(false);
 });
-// API : api.champis.app (le site est un service à part), l'API locale en développement, ou `?api=` (Site.apiBase).
+// API : api.champis.app (le site est un service à part) ; sur un poste local, l'API locale ou `?api=` (Site.apiBase).
 $("api").value = Site.apiBase(location);
 $("api").addEventListener("change", fetchWeather);
 let moveTimer = null;
@@ -778,7 +778,10 @@ async function fetchWeather() {
 
 // ---------------------------------------------------------------- chargement des PMTiles
 
-const speciesMeta = (id) => fetch(`../species/${id}.json`).then((r) => (r.ok ? r.json() : null));
+// L'identifiant vient d'un nom de fichier ou du manifeste : il n'entre dans le chemin que s'il a la
+// forme d'un identifiant d'espèce.
+const speciesMeta = (id) =>
+  Site.isSpeciesId(id) ? fetch(`../species/${id}.json`).then((r) => (r.ok ? r.json() : null)) : Promise.resolve(null);
 
 /** Une espèce a sa couche si l'API la sert (catalogue des espèces complètes) ou sans API. */
 const isServed = (id) => catalogIds === null || catalogIds.has(id);
@@ -898,8 +901,9 @@ function refreshLayerList() {
   renderPicker();
 }
 
+/** `?tiles=…` : outil de développement, ignoré hors d'un poste local (comme `?api=`, Site.apiBase). */
 function loadFromQuery() {
-  const q = new URLSearchParams(location.search).get("tiles");
+  const q = Site.isLocal(location) ? new URLSearchParams(location.search).get("tiles") : null;
   if (!q) return null;
   return addMany(q.split(",").map((u) => ({ src: u, label: u })));
 }
@@ -1015,7 +1019,7 @@ function renderProbe({ value, name, phrases, details, days = null, forest = null
   const when = currentDate() ? Site.whenWord(currentDate(), weather.today) : "";
   const sub = [name, currentDate() ? frenchDate(currentDate()) : ""].filter(Boolean).join(" · ");
   probe.innerHTML =
-    `<h2><span class="dot" style="background:${cls.hex}"></span>${esc(cls.fr)} ${esc(when)}</h2>` +
+    `<h2><span class="dot" style="background:${Site.safeHex(cls.hex)}"></span>${esc(cls.fr)} ${esc(when)}</h2>` +
     `<div class="sub">${esc(sub)}</div>` +
     (phrases.length ? `<ul>${phrases.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : "") +
     (days ? `<div id="probe-days" aria-label="Les onze jours de ce point"></div>` : "") +
