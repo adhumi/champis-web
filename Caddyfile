@@ -1,15 +1,11 @@
 # Site champis.app (adhumi/champis-web) : service statique Railway depuis le découpage des dépôts
 # (spec › Produit › Étape C, lot C7, 6 nov. 2026). Les pages sont à la racine (/, /carte.html…),
-# /shared/ et /species/ servent le référentiel (sous-module champis/). L'API est sur api.champis.app.
+# /shared/ et /species/ servent le référentiel (sous-module champis/). L'API est sur api.champis.app :
+# ce service ne relaie plus rien vers elle (relais des anciennes versions de l'app retiré le
+# 13 nov. 2026), tout chemin qui n'est pas un fichier servi ici répond 404.
 {
 	admin off
 	auto_https off
-	# Le conteneur n'est joignable que par le proxy de Railway : son X-Forwarded-For (l'adresse du
-	# visiteur) est gardé en tête et relayé tel quel. Le limiteur de débit de l'API en lit le premier
-	# élément ; sans ce réglage, tous les visiteurs relayés auraient l'adresse du proxy.
-	servers {
-		trusted_proxies static 0.0.0.0/0 ::/0
-	}
 }
 
 :{$PORT:8080} {
@@ -41,8 +37,7 @@
 	}
 
 	# Le site, à la racine : / et tout chemin qui est un fichier de web/ (/carte.html, /site.css,
-	# /vendor/…). Un chemin qui n'y est pas part vers l'API, plus bas : ne pas nommer un fichier de
-	# web/ comme une route de l'API.
+	# /vendor/…).
 	rewrite / /index.html
 	@site file {
 		root /srv/web
@@ -61,7 +56,6 @@
 	}
 
 	# Le référentiel, et les fichiers du site à leur ancien chemin /web/ (mêmes règles de cache).
-	# GET /species (sans barre finale) reste à l'API.
 	@referentiel path /web/* /shared/* /species/*
 	handle @referentiel {
 		root * /srv
@@ -73,13 +67,10 @@
 		file_server
 	}
 
-	# Tout le reste part vers l'API : les versions de l'app d'avant le découpage l'appellent sur
-	# champis.app (/weather, /tiles, /observations, /coins…). Relais à retirer quand plus aucune
-	# version en service n'utilise cette adresse (spec › Étape C, lot C7). CHAMPIS_API_UPSTREAM sert
-	# à la CI (fausse API locale).
+	# Tout le reste n'existe pas ici. Le relais vers l'API (les versions de l'app d'avant le
+	# découpage appelaient /weather, /tiles, /observations… sur champis.app) est retiré : l'API
+	# n'est jointe que par api.champis.app.
 	handle {
-		reverse_proxy {$CHAMPIS_API_UPSTREAM:https://api.champis.app} {
-			header_up Host {http.reverse_proxy.upstream.host}
-		}
+		respond "Page introuvable" 404
 	}
 }

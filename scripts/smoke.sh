@@ -1,7 +1,8 @@
 #!/bin/sh
 # Contrôle d'un site champis-web qui tourne : santé, pages à la racine, anciennes adresses /web/,
-# référentiel, relais vers l'API. Usage : scripts/smoke.sh [URL] (défaut http://localhost:8080). La CI
-# le lance sur l'image construite (fausse API locale) ; `make smoke URL=…` après un déploiement.
+# référentiel, 404 hors du site (plus de relais vers l'API). Usage : scripts/smoke.sh [URL] (défaut
+# http://localhost:8080). La CI le lance sur l'image construite ; `make smoke URL=…` après un
+# déploiement.
 set -eu
 BASE="${1:-http://localhost:8080}"
 FAIL=0
@@ -37,11 +38,14 @@ check "/web/comprendre.html?article=confidentialite" "301 $BASE/comprendre.html?
 check /web/departements.geojson 200
 check /web/site.js 200
 check /web/absent.css 404
-# relais : GET /species (sans barre finale) et /health de l'API passent par le site
-check /species 200
+# plus de relais vers l'API (13 nov. 2026) : ses routes n'existent pas sur le site
+check /species 404
+check "/weather?cell=42" 404
+check /tiles 404
+check /admin/ 404
 
 body=$(curl -sS "$BASE/health")
-[ "$body" = "ok" ] || { echo "ECHEC   /health répond « $body » au lieu de « ok » (relayé ?)"; FAIL=1; }
+[ "$body" = "ok" ] || { echo "ECHEC   /health répond « $body » au lieu de « ok »"; FAIL=1; }
 
 for path in /vendor/README.md /web/vendor/README.md; do
 	cache=$(curl -sS -o /dev/null -D - "$BASE$path" | tr -d '\r' | grep -i '^cache-control:' || true)
