@@ -11,7 +11,7 @@ web/          pages (index, carte, comprendre, soutenir), site.js (fonctions pur
 web/tests/    pytest qui pilote node ; referential.py et pngtiles.py remplacent le paquet du pipeline
 champis/      sous-module adhumi/champis : shared/ (palette, textes), species/
 shared, species   liens vers champis/ pour le serveur local ; le Dockerfile copie les vrais dossiers
-Caddyfile     /web/, /shared/, /species/, / → /web/, /health ; le reste est relayé vers api.champis.app (anciennes versions de l'app)
+Caddyfile     pages de web/ à la racine (/, /carte.html… ; les anciennes adresses /web/*.html y redirigent, les fichiers de /web/ restent servis), /shared/, /species/, /health ; le reste est relayé vers api.champis.app (anciennes versions de l'app)
 scripts/      smoke.sh : contrôle d'un site qui tourne (CI sur l'image, `make smoke URL=…` après un déploiement) ; fake_api.py : fausse API de la CI
 ```
 
