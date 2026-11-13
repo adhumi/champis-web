@@ -2,7 +2,10 @@
  * (web/tests/test_field.py) : choix de la source selon le zoom (`/weather/field` sous FIELD_ZOOM,
  * `/weather/bbox` au-dessus — spec › Points ouverts › Carte visible dès l'ouverture, 4 nov. 2026),
  * fusion des deux réponses dans une seule structure de cellules, index spatial par casiers pour la
- * cellule la plus proche, et facteur M_eff × Φ d'un pixel. Rien ici ne connaît une espèce ni un
+ * cellule la plus proche, facteur M_eff × Φ d'une cellule et son interpolation bilinéaire entre
+ * les centres des cellules voisines (spec › Scoring › Interpolation de la météo entre cellules,
+ * 13 nov. 2026 ; portage de champis_api/interp.py, rejoué contre shared/vectors/interp.json).
+ * Rien ici ne connaît une espèce ni un
  * seuil : les valeurs viennent de l'API, l'encodage des classes d'altitude de shared/palette.json.
  *
  * Une cellule fusionnée : { id, lat, lon, elevation_m, alt_classes, stale,
@@ -20,17 +23,19 @@
   const KM_PER_DEG = 111.2;
   /** Casiers de l'index spatial, en degrés : environ une cellule de la grille. */
   const BIN_DEG = 0.05;
-  /** Taille du bloc (px) à l'intérieur duquel les pixels partagent une cellule météo : 16 px à
-   *  partir du zoom 9 (≈ 5 km, la cellule), moitié moins à chaque niveau en dessous pour garder
-   *  un bloc de l'ordre de la cellule, jamais moins de 2 px (z6 : 2 px ≈ 3,5 km à 47° N). */
+  /** Taille du bloc (px) à l'intérieur duquel les pixels partagent les mêmes poids
+   *  d'interpolation : 16 px à partir du zoom 12 (≈ 430 m à 47° N, un douzième de cellule : le
+   *  dégradé entre deux centres ne fait pas de marche visible), moitié moins à chaque niveau en
+   *  dessous pour garder cette taille au sol, jamais moins de 2 px. */
   const BLOCK_PX = 16;
+  const BLOCK_ZOOM = 12;
 
   const weatherSource = (zoom) => (zoom < FIELD_ZOOM ? "field" : "bbox");
 
   function blockPx(zoom) {
     const z = Math.floor(zoom);
-    if (z >= FIELD_ZOOM) return BLOCK_PX;
-    return Math.max(2, BLOCK_PX >> (FIELD_ZOOM - z));
+    if (z >= BLOCK_ZOOM) return BLOCK_PX;
+    return Math.max(2, BLOCK_PX >> (BLOCK_ZOOM - z));
   }
 
   /** Jour civil local (le bandeau ne connaît pas encore `today` au premier chargement). */
@@ -82,7 +87,10 @@
         e.f[sid] = days;
       }
     }
-    return { count: body.cells.length, stale, missing: body.unavailable?.length ?? 0, day: null };
+    return {
+      count: body.cells.length, stale, missing: body.unavailable?.length ?? 0, day: null,
+      unavailable: Array.isArray(body.unavailable) ? body.unavailable : [],
+    };
   }
 
   /** Fusionne une réponse de /weather/field (un seul jour `body.day`, facteur M_eff × Φ déjà
@@ -106,18 +114,28 @@
   // clé entière d'un casier : lat ∈ [−90, 90] → 3 600 casiers, lon ∈ [−180, 180] → 7 200
   const binKey = (iy, ix) => (iy + 2000) * 8192 + (ix + 4000);
 
-  /** Casiers de BIN_DEG° → cellules ; à reconstruire quand `cells` change. */
-  function buildIndex(cells) {
+  /** Casiers de BIN_DEG° → cellules, et grille (i, j) → cellule pour l'interpolation ; à
+   *  reconstruire quand `cells` change. `unavailable` : identifiants des cellules que l'API a
+   *  listées sans météo (leurs pixels restent transparents, jamais la météo d'une voisine). */
+  function buildIndex(cells, unavailable) {
     const bins = new Map();
+    const grid = new Map();
     let size = 0;
     for (const c of cells.values ? cells.values() : cells) {
       const k = binKey(binOf(c.lat), binOf(c.lon));
       const b = bins.get(k);
       if (b) b.push(c);
       else bins.set(k, [c]);
+      const ij = parseCellId(c.id);
+      if (ij) grid.set(gridKey(ij[0], ij[1]), c);
       size++;
     }
-    return { bins, size };
+    const closed = new Set();
+    for (const id of unavailable ?? []) {
+      const ij = parseCellId(id);
+      if (ij && !grid.has(gridKey(ij[0], ij[1]))) closed.add(gridKey(ij[0], ij[1]));
+    }
+    return { bins, grid, closed, size };
   }
 
   /** Cellule la plus proche à moins de MAX_CELL_KM (distance équirectangulaire), sinon null :
@@ -151,6 +169,129 @@
     return best;
   }
 
+  // ------------------------------------------------------------ interpolation entre cellules
+
+  const CELL_M = 5000;
+  // Lambert-93 (RGF93, conique conforme sécante 44° / 49°, origine 46,5° N 3° E) : constantes IGN,
+  // les mêmes que champis_api/interp.py.
+  const L93_E = 0.0818191910428158; // première excentricité GRS80
+  const L93_N = 0.725607765053267;
+  const L93_C = 11754255.426096;
+  const L93_XS = 700000;
+  const L93_YS = 12655612.049876;
+  const L93_LON0 = (3 * Math.PI) / 180;
+
+  /** [x, y] Lambert-93 en mètres d'un point WGS84 en degrés (formule directe, sans bibliothèque). */
+  function lambert93(lat, lon) {
+    const s = Math.sin((lat * Math.PI) / 180);
+    const iso = Math.atanh(s) - L93_E * Math.atanh(L93_E * s); // latitude isométrique
+    const r = L93_C * Math.exp(-L93_N * iso);
+    const gamma = L93_N * ((lon * Math.PI) / 180 - L93_LON0);
+    return [L93_XS + r * Math.sin(gamma), L93_YS - r * Math.cos(gamma)];
+  }
+
+  const pad4 = (n) => String(n).padStart(4, "0");
+  /** Identifiant de la cellule d'indices (i, j) : coin sud-ouest en km (`c_0930_6680`). */
+  const cellId = (i, j) => `c_${pad4(i * 5)}_${pad4(j * 5)}`;
+  const gridKey = (i, j) => i * 65536 + j;
+
+  /** `c_0930_6680` → [186, 1336] ; null si l'identifiant n'a pas cette forme. */
+  function parseCellId(id) {
+    const m = /^c_(\d+)_(\d+)$/.exec(id ?? "");
+    return m ? [Math.round(+m[1] / 5), Math.round(+m[2] / 5)] : null;
+  }
+
+  /** Les quatre cellules dont les centres encadrent le point, en indices de grille : coin
+   *  sud-ouest (i0, j0), fractions (fx, fy) vers l'est et le nord, et cellule (ci, cj) qui
+   *  contient le point. */
+  function cornersIJ(lat, lon) {
+    const [x, y] = lambert93(lat, lon);
+    const u = x / CELL_M - 0.5; // en unités de cellule, 0 au centre de la cellule d'indice 0
+    const v = y / CELL_M - 0.5;
+    const i0 = Math.floor(u);
+    const j0 = Math.floor(v);
+    return { i0, j0, fx: u - i0, fy: v - j0, ci: Math.floor(x / CELL_M), cj: Math.floor(y / CELL_M) };
+  }
+
+  /** Forme du vecteur de parité : cellule contenante, identifiants SO, SE, NO, NE et poids
+   *  bilinéaires (somme 1). */
+  function corners(lat, lon) {
+    const { i0, j0, fx, fy, ci, cj } = cornersIJ(lat, lon);
+    return {
+      containing: cellId(ci, cj),
+      ids: [cellId(i0, j0), cellId(i0 + 1, j0), cellId(i0, j0 + 1), cellId(i0 + 1, j0 + 1)],
+      weights: [(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy],
+    };
+  }
+
+  /** Moyenne des coins qui ont une valeur, pondérée par leurs poids renormalisés ; null si la
+   *  cellule qui contient le point n'en a pas. `values` : identifiant → nombre (absent ou null =
+   *  sans météo). */
+  function interpolate(c, values) {
+    const home = values[c.containing];
+    if (home === undefined || home === null) return null;
+    let num = 0;
+    let den = 0;
+    for (let n = 0; n < 4; n++) {
+      const v = values[c.ids[n]];
+      if (v === undefined || v === null) continue;
+      num += c.weights[n] * v;
+      den += c.weights[n];
+    }
+    return num / den;
+  }
+
+  /** Ce qu'il faut pour interpoler en un point avec les cellules chargées : les quatre coins
+   *  (null quand la cellule n'est pas chargée), leurs poids, et la cellule `home` qui porte le
+   *  point. Hors grille (cellule contenante ni chargée ni listée sans météo), repli sur la
+   *  cellule la plus proche à moins de MAX_CELL_KM, sans interpolation (`cells` null). Sans
+   *  météo : null. */
+  function sample(index, lat, lon) {
+    if (!index) return null;
+    const { i0, j0, fx, fy, ci, cj } = cornersIJ(lat, lon);
+    const home = index.grid.get(gridKey(ci, cj));
+    if (!home) {
+      if (index.closed.has(gridKey(ci, cj))) return null;
+      const near = nearestCell(index, lat, lon);
+      return near ? { home: near, cells: null, weights: null } : null;
+    }
+    return {
+      home,
+      cells: [
+        index.grid.get(gridKey(i0, j0)) ?? null,
+        index.grid.get(gridKey(i0 + 1, j0)) ?? null,
+        index.grid.get(gridKey(i0, j0 + 1)) ?? null,
+        index.grid.get(gridKey(i0 + 1, j0 + 1)) ?? null,
+      ],
+      weights: [(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy],
+    };
+  }
+
+  /** M_eff × Φ interpolé d'un échantillon (`sample`) ; `get(cellule)` donne le facteur d'une
+   *  cellule ou null. null si la cellule qui porte le point n'a pas de facteur. */
+  function sampleFactor(s, get) {
+    const base = get(s.home);
+    if (base === null || s.cells === null) return base;
+    let num = 0;
+    let den = 0;
+    for (let n = 0; n < 4; n++) {
+      const c = s.cells[n];
+      if (c === null) continue;
+      const v = c === s.home ? base : get(c);
+      if (v === null) continue;
+      num += s.weights[n] * v;
+      den += s.weights[n];
+    }
+    return num / den;
+  }
+
+  /** M_eff × Φ interpolé en un point pour une espèce, un jour et l'indice de classe d'altitude
+   *  du pixel : chaque cellule donne sa valeur pour sa classe la plus proche. null sans météo. */
+  function pointFactor(index, sid, date, lat, lon, k, altEncoding) {
+    const s = sample(index, lat, lon);
+    return s ? sampleFactor(s, (c) => factor(c, sid, date, altCenter(c, k, altEncoding))) : null;
+  }
+
   // ------------------------------------------------------------ tuiles et facteur
 
   function tilePixelToLngLat(z, x, y, px, py, tile) {
@@ -160,15 +301,16 @@
     return [lon, lat];
   }
 
-  /** Cellule météo de chaque bloc de `block` px d'une tuile (ligne par ligne), null sans cellule
-   *  à moins de MAX_CELL_KM : une recherche par bloc, partagée par toutes les espèces. */
-  function tileCells(index, z, x, y, tile, block) {
+  /** Échantillon d'interpolation (`sample`) de chaque bloc de `block` px d'une tuile (ligne par
+   *  ligne), pris au centre du bloc ; null sans météo : un calcul par bloc, partagé par toutes
+   *  les espèces. */
+  function tileSamples(index, z, x, y, tile, block) {
     const blocks = tile / block;
     const out = new Array(blocks * blocks);
     for (let by = 0; by < blocks; by++) {
       for (let bx = 0; bx < blocks; bx++) {
         const [lon, lat] = tilePixelToLngLat(z, x, y, (bx + 0.5) * block, (by + 0.5) * block, tile);
-        out[by * blocks + bx] = nearestCell(index, lat, lon);
+        out[by * blocks + bx] = sample(index, lat, lon);
       }
     }
     return out;
@@ -196,7 +338,8 @@
     FIELD_ZOOM, MAX_CELL_KM, KM_PER_DEG, BIN_DEG, BLOCK_PX,
     weatherSource, blockPx, localToday, covers,
     mergeBbox, mergeField, buildIndex, nearestCell,
-    tilePixelToLngLat, tileCells, altCenter, factor,
+    lambert93, corners, interpolate, sample, sampleFactor, pointFactor,
+    tilePixelToLngLat, tileSamples, altCenter, factor,
   };
   root.Field = Field;
   if (typeof module !== "undefined" && module.exports) module.exports = Field;

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from referential import load_palette
+from referential import REFERENTIAL, load_palette
 
 HERE = Path(__file__).parent
 DRIVER = HERE / "field_driver.js"
@@ -131,8 +131,18 @@ def test_field_below_zoom_9_and_bbox_above():
         "bbox",
         "bbox",
     ]
-    # bloc de pixels partageant une cellule : 16 px dès le zoom 9, moitié par niveau en dessous
-    assert run(*(("blockPx", [z]) for z in (6, 6.7, 7, 8, 9, 12))) == [2, 2, 4, 8, 16, 16]
+    # bloc de pixels partageant les mêmes poids d'interpolation : 16 px dès le zoom 12 (≈ 430 m),
+    # moitié par niveau en dessous, jamais moins de 2 px
+    assert run(*(("blockPx", [z]) for z in (6, 8, 9, 9.7, 10, 11, 12, 15))) == [
+        2,
+        2,
+        2,
+        2,
+        4,
+        8,
+        16,
+        16,
+    ]
 
 
 def test_coverage_rule_same_layer_contained_box_and_ttl():
@@ -177,7 +187,7 @@ def test_bbox_and_field_merge_into_the_same_cells_and_factor_reads_both():
         # classe que l'API n'a pas calculée pour la cellule
         ("factor", [ref("d"), "boletus_edulis", "2026-11-06", 450]),
     )
-    assert got_bbox == {"count": 2, "stale": 1, "missing": 1, "day": None}
+    assert got_bbox == {"count": 2, "stale": 1, "missing": 1, "day": None, "unavailable": ["c_c"]}
     assert got_field == {"count": 2, "stale": 1, "missing": 2, "day": "2026-11-06"}
     assert n == 3  # c_a fusionnée, c_b (bbox seul), c_d (field seul) ; c_c manquante n'existe pas
     assert factors == [
@@ -284,25 +294,94 @@ def test_nearest_cell_without_index_is_null():
     assert run(("nearestCell", [None, 47.0, 6.3])) == [None]
 
 
-def test_tile_cells_share_one_lookup_per_block():
-    # tuile z9 contenant 6,3° E 47° N ; la seule cellule est au centre d'un bloc : les blocs à
-    # moins de 7,5 km l'ont, les coins de la tuile (≈ 35 km) non
-    z = 9
+# ---------------------------------------------------------------- interpolation entre cellules
+
+VECTORS = json.loads((REFERENTIAL / "shared" / "vectors" / "interp.json").read_text("utf-8"))
+
+
+def test_interp_vectors():
+    """Parité avec champis_api/interp.py (skill scoring-parity) : coins, poids et valeur."""
+    cases = VECTORS["cases"]
+    assert len(cases) >= 50
+    out = run(*(("corners", [c["lat"], c["lon"]]) for c in cases))
+    values = run(*(("interpolate", [k, c["values"]]) for k, c in zip(out, cases, strict=True)))
+    for c, k, v in zip(cases, out, values, strict=True):
+        exp = c["expected"]
+        assert k["containing"] == exp["containing"] and k["ids"] == exp["ids"], c
+        assert k["weights"] == pytest.approx(exp["weights"], abs=1e-6)
+        if exp["value"] is None:
+            assert v is None, c
+        else:
+            assert v == pytest.approx(exp["value"], abs=1e-6), c
+
+
+def _cell(cid: str, lat: float, lon: float, f: float | None = None) -> dict:
+    days = {} if f is None else {"e": {"2026-11-13": [f]}}
+    return {
+        "id": cid,
+        "lat": lat,
+        "lon": lon,
+        "elevation_m": 150,
+        "alt_classes": [150.0],
+        "f": days,
+    }
+
+
+def test_point_factor_interpolates_loaded_neighbours():
+    # premier cas du vecteur : quatre coins, valeurs 0,8 / 0,1 / 0,4 / 0,6
+    c = VECTORS["cases"][0]
+    cells = [_cell(cid, c["lat"], c["lon"], v) for cid, v in c["values"].items()]
+    args = ["e", "2026-11-13", c["lat"], c["lon"], None, ALT]
+    home = [x for x in cells if x["id"] == c["expected"]["containing"]]
+    _, got, _, alone, unknown_day = run(
+        ("buildIndex", [cells], "all"),
+        ("pointFactor", [ref("all"), *args]),
+        ("buildIndex", [home], "one"),
+        ("pointFactor", [ref("one"), *args]),
+        ("pointFactor", [ref("all"), "e", "2026-11-14", c["lat"], c["lon"], None, ALT]),
+    )
+    assert unknown_day is None
+    assert got == pytest.approx(c["expected"]["value"], abs=1e-6)
+    # sans voisine chargée, la valeur de la cellule se prolonge à plat
+    assert alone == pytest.approx(c["values"][c["expected"]["containing"]])
+
+
+def test_point_without_weather_in_its_cell_stays_empty():
+    c = VECTORS["cases"][0]
+    home = c["expected"]["containing"]
+    others = [_cell(cid, c["lat"], c["lon"], 0.5) for cid in c["expected"]["ids"] if cid != home]
+    args = ["e", "2026-11-13", c["lat"], c["lon"], None, ALT]
+    closed, off_grid, no_day = run(
+        # cellule du point listée sans météo par l'API : jamais la météo des voisines
+        ("buildIndex", [others, [home]], "closed"),
+        ("pointFactor", [ref("closed"), *args]),
+        # hors grille (ni chargée ni listée) : cellule la plus proche à moins de 7,5 km
+        ("buildIndex", [others], "open"),
+        ("pointFactor", [ref("open"), *args]),
+        # cellule du point chargée mais sans ce jour : rien, même si les voisines l'ont
+        ("buildIndex", [[*others, _cell(home, c["lat"], c["lon"])]], "noday"),
+        ("pointFactor", [ref("noday"), *args]),
+    )[1::2]
+    assert closed is None and no_day is None
+    assert off_grid == pytest.approx(0.5)
+
+
+def test_tile_samples_one_per_block():
+    # tuile z12 autour du premier point du vecteur : chaque bloc de 16 px a son échantillon,
+    # null quand aucune cellule n'est à moins de 7,5 km
+    c = VECTORS["cases"][0]
+    z = 12
     n = 2**z
-    x = int((6.3 + 180) / 360 * n)
-    lat = math.radians(47.0)
+    x = int((c["lon"] + 180) / 360 * n)
+    lat = math.radians(c["lat"])
     y = int((1 - math.log(math.tan(lat) + 1 / math.cos(lat)) / math.pi) / 2 * n)
-    (lon_c, lat_c), (lon_tl, lat_tl), (lon_br, lat_br) = run(
-        ("tilePixelToLngLat", [z, x, y, 128, 128, 256]),
-        ("tilePixelToLngLat", [z, x, y, 0, 0, 256]),
-        ("tilePixelToLngLat", [z, x, y, 256, 256, 256]),
+    cells = [_cell(cid, c["lat"], c["lon"], v) for cid, v in c["values"].items()]
+    (_, samples, _, empty) = run(
+        ("buildIndex", [cells], "index"),
+        ("tileSamples", [ref("index"), z, x, y, 256, 16]),
+        ("buildIndex", [[_cell("c_0100_6000", 43.0, -1.0, 0.5)]], "far"),
+        ("tileSamples", [ref("far"), z, x, y, 256, 16]),
     )
-    assert lon_tl < lon_c < lon_br and lat_br < lat_c < lat_tl
-    cell = {"id": "c", "lat": lat_c, "lon": lon_c, "alt_classes": [150.0], "f": {}}
-    (_, blocks) = run(
-        ("buildIndex", [[cell]], "index"), ("tileCells", [ref("index"), z, x, y, 256, 16])
-    )
-    assert len(blocks) == 256
-    assert blocks[8 * 16 + 8]["id"] == "c"
-    assert blocks[0] is None and blocks[-1] is None
-    assert 0 < sum(b is not None for b in blocks) < 256
+    assert len(samples) == 256 and all(s is not None for s in samples)
+    assert all(abs(sum(s["weights"]) - 1) < 1e-9 for s in samples if s["weights"])
+    assert all(s is None for s in empty)

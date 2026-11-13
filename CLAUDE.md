@@ -27,6 +27,7 @@ scripts/      smoke.sh : contrôle d'un site qui tourne (CI sur l'image, `make s
 - Jamais de commit poussé sur `main` sans PR : branche, PR, CI verte, fusion (règle du 30 oct. 2026).
 - Aucune valeur d'espèce ni couleur dans le code : palette et espèces viennent du référentiel (`/shared/`, `/species/`) ou de l'API.
 - La carte n'affiche que les espèces servies par `GET /species` (le catalogue de l'API : espèces complètes, bloc `about`, photo, planche, **et** dont les tuiles T France sont publiées ; décisions du 9 nov. 2026) ; sans API, tout ce qui est chargé s'affiche (mode dev, glisser-déposer).
+- La météo d'un pixel est interpolée entre les centres des cellules voisines (`web/field.js`, portage de `champis_api/interp.py` validé par `champis/shared/vectors/interp.json` ; spec › Scoring, 13 nov. 2026) : un changement de la règle se fait d'abord dans champis-api et le vecteur.
 - L'API est sur une autre origine : un appel nouveau se vérifie avec le CORS de champis-api (en-têtes autorisés et exposés).
 - Aucune requête vers un tiers non nécessaire (spec › Mesure minimale) : pas de CDN, pas de police ou de script externe ; seuls l'IGN (fond Plan IGN, recherche, forêts publiques) et OpenStreetMap si on le choisit.
 - `web/tests/pngtiles.py` encode les PNG exactement comme le pipeline : un changement d'encodage côté champis-api se reporte ici.
