@@ -1,6 +1,6 @@
 # Site champis.app (adhumi/champis-web) : service statique Railway depuis le découpage des dépôts
-# (spec › Produit › Étape C, lot C7, 6 nov. 2026). Mêmes chemins qu'avant : /web/ pour les pages,
-# /shared/ et /species/ pour le référentiel (sous-module champis/). L'API est sur api.champis.app.
+# (spec › Produit › Étape C, lot C7, 6 nov. 2026). Les pages sont à la racine (/, /carte.html…),
+# /shared/ et /species/ servent le référentiel (sous-module champis/). L'API est sur api.champis.app.
 {
 	admin off
 	auto_https off
@@ -19,20 +19,53 @@
 		-Server
 	}
 
-	redir / /web/ 302
-
 	# santé du service lui-même (contrôle de Railway), sans dépendre de l'API
 	handle /health {
 		respond "ok" 200
 	}
 
-	# Le site : pages, bibliothèques et référentiel. GET /species (sans barre finale) reste à l'API.
-	@site path /web /web/* /shared/* /species/*
+	# Anciennes adresses des pages (/web/…, celles d'avant le 13 nov. 2026, encore dans l'app et les
+	# liens publiés) : redirigées vers la racine, requête comprise. Seules les pages le sont : les
+	# fichiers de /web/ restent servis plus bas, pour les clients qui ne suivent pas les redirections
+	# (champis-api et l'app lisent /web/departements.geojson).
+	redir /web / 301
+	redir /web/ / 301
+	redir /web/index.html / 301
+	@anciennes_pages path_regexp ^/web/[^/]+\.html$
+	handle @anciennes_pages {
+		# `route` garde l'ordre écrit : sans lui, `redir` passerait avant `uri` et bouclerait
+		route {
+			uri strip_prefix /web
+			redir {uri} 301
+		}
+	}
+
+	# Le site, à la racine : / et tout chemin qui est un fichier de web/ (/carte.html, /site.css,
+	# /vendor/…). Un chemin qui n'y est pas part vers l'API, plus bas : ne pas nommer un fichier de
+	# web/ comme une route de l'API.
+	rewrite / /index.html
+	@site file {
+		root /srv/web
+		try_files {path}
+	}
 	handle @site {
-		root * /srv
+		root * /srv/web
 		encode zstd gzip
 		# bibliothèques versionnées par leur dossier : immuables ; le reste se revalide vite (matchers
 		# disjoints : deux `header` sur le même chemin, le dernier l'emporte)
+		@vendor path /vendor/*
+		header @vendor Cache-Control "public, max-age=31536000, immutable"
+		@revalidate not path /vendor/*
+		header @revalidate Cache-Control "public, max-age=300"
+		file_server
+	}
+
+	# Le référentiel, et les fichiers du site à leur ancien chemin /web/ (mêmes règles de cache).
+	# GET /species (sans barre finale) reste à l'API.
+	@referentiel path /web/* /shared/* /species/*
+	handle @referentiel {
+		root * /srv
+		encode zstd gzip
 		@vendor path /web/vendor/*
 		header @vendor Cache-Control "public, max-age=31536000, immutable"
 		@revalidate not path /web/vendor/*

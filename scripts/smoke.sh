@@ -1,7 +1,7 @@
 #!/bin/sh
-# Contrôle d'un site champis-web qui tourne : santé, redirection, pages, référentiel, relais vers
-# l'API. Usage : scripts/smoke.sh [URL] (défaut http://localhost:8080). La CI le lance sur l'image
-# construite (fausse API locale) ; `make smoke URL=…` après un déploiement.
+# Contrôle d'un site champis-web qui tourne : santé, pages à la racine, anciennes adresses /web/,
+# référentiel, relais vers l'API. Usage : scripts/smoke.sh [URL] (défaut http://localhost:8080). La CI
+# le lance sur l'image construite (fausse API locale) ; `make smoke URL=…` après un déploiement.
 set -eu
 BASE="${1:-http://localhost:8080}"
 FAIL=0
@@ -21,27 +21,34 @@ check() {
 }
 
 check /health 200
-check / "302 $BASE/web/" "%{http_code} %{redirect_url}"
-check /web/ 200
-check /web/carte.html 200
-check /web/comprendre.html 200
-check /web/soutenir.html 200
-check /web/site.js 200
-check /web/vendor/README.md 200
+check / 200
+check /carte.html 200
+check /comprendre.html 200
+check /soutenir.html 200
+check /site.js 200
+check /vendor/README.md 200
 check /shared/palette.json 200
 check /shared/texts/index.json 200
 check /species/boletus_edulis.json 200
-check /web/absent.html 404
+# anciennes adresses /web/… : les pages sont redirigées (requête comprise), les fichiers restent servis
+check /web/ "301 $BASE/" "%{http_code} %{redirect_url}"
+check /web/index.html "301 $BASE/" "%{http_code} %{redirect_url}"
+check "/web/comprendre.html?article=confidentialite" "301 $BASE/comprendre.html?article=confidentialite" "%{http_code} %{redirect_url}"
+check /web/departements.geojson 200
+check /web/site.js 200
+check /web/absent.css 404
 # relais : GET /species (sans barre finale) et /health de l'API passent par le site
 check /species 200
 
 body=$(curl -sS "$BASE/health")
 [ "$body" = "ok" ] || { echo "ECHEC   /health répond « $body » au lieu de « ok » (relayé ?)"; FAIL=1; }
 
-cache=$(curl -sS -o /dev/null -D - "$BASE/web/vendor/README.md" | tr -d '\r' | grep -i '^cache-control:' || true)
-case "$cache" in
-	*immutable*) echo "ok      cache immuable de web/vendor/" ;;
-	*) echo "ECHEC   web/vendor/ sans cache immuable : « $cache »"; FAIL=1 ;;
-esac
+for path in /vendor/README.md /web/vendor/README.md; do
+	cache=$(curl -sS -o /dev/null -D - "$BASE$path" | tr -d '\r' | grep -i '^cache-control:' || true)
+	case "$cache" in
+		*immutable*) echo "ok      cache immuable de $path" ;;
+		*) echo "ECHEC   $path sans cache immuable : « $cache »"; FAIL=1 ;;
+	esac
+done
 
 exit $FAIL
