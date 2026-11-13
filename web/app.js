@@ -68,15 +68,16 @@ const transparentTile = makeTransparentTile();
 // covered : dernière emprise entièrement reçue de /weather/bbox (avec sa marge), sa couche, son heure
 // fieldCovered : jour → même chose pour /weather/field, pour que revenir sur un jour déjà vu ne
 // redemande rien (spec › Points ouverts › Carte visible dès l'ouverture, 4 nov. 2026)
-const weather = { today: null, computedAt: null, cells: new Map(), index: null, error: null, covered: null, fieldCovered: new Map() };
+const weather = { today: null, computedAt: null, cells: new Map(), unavailable: [], index: null, error: null, covered: null, fieldCovered: new Map() };
 // Le bandeau des jours et l'indice par département (/departements) qui le colorait sont retirés de la
 // carte (spec › Produit › étape A, 6 nov. 2026) : la carte montre toujours aujourd'hui, les onze
 // jours d'un point sont dans sa fiche.
 // Le potentiel toute saison (T seul) n'est plus proposé (9 nov. 2026) : la carte montre toujours le
 // score du jour S = T × M_eff × Φ.
-// La cellule météo est cherchée par bloc de pixels, pas par pixel (Field.blockPx : 16 px à partir
-// du zoom 9, moins en dessous), à moins de Field.MAX_CELL_KM (7,5 km), sinon le pixel est
-// transparent plutôt que de prendre la météo d'une cellule chargée pour une autre emprise.
+// La météo d'un pixel est interpolée entre les centres des cellules qui l'encadrent (spec ›
+// Scoring › Interpolation de la météo entre cellules, 13 nov. 2026), par bloc de pixels
+// (Field.blockPx : 16 px à partir du zoom 12, moins en dessous). Un pixel dont la cellule n'a pas
+// de météo reste transparent ; hors grille, cellule la plus proche à moins de Field.MAX_CELL_KM.
 const OPACITY = 1; // l'alpha de chaque pixel est son score (échelle linéaire, 6 nov. 2026) : couche opaque
 // Tuiles décodées gardées en mémoire (T par espèce et A, ≈ 260 Ko chacune ; une tuile G compte
 // pour autant d'unités que de canaux, ses quatre T restant ensemble dans l'entrée) : changer de
@@ -296,48 +297,62 @@ function readPlanText(key) {
   return parts.join(" + ") || "rien";
 }
 
-/** Valeur affichée par pixel : S = T × M_eff × Φ (max du groupe, règle 9). La cellule météo est cherchée une fois par bloc de pixels (Field.tileCells), pour
- *  toutes les espèces ; le facteur M_eff × Φ est mémorisé par cellule et classe d'altitude, la
- *  classe étant lue par pixel dans la couche A quand elle est chargée. Un pixel sans cellule à
- *  moins de 7,5 km, ou dont la cellule n'a pas le jour demandé, reste transparent (jamais 0,5). */
+/** Valeur affichée par pixel : S = T × M_eff × Φ (max du groupe, règle 9). M_eff × Φ est
+ *  interpolé entre les centres des cellules voisines (Field.tileSamples : poids calculés une fois
+ *  par bloc de pixels, pour toutes les espèces) ; le facteur de chaque cellule est mémorisé par
+ *  classe d'altitude, la classe étant lue par pixel dans la couche A quand elle est chargée. Un
+ *  pixel dont la cellule n'a pas de météo ou pas le jour demandé reste transparent (jamais 0,5). */
 function combine(arrays, z, x, y, alt) {
   if (arrays.length === 0) return null;
   const out = new Float32Array(TILE * TILE).fill(NaN);
   const date = currentDate();
   const block = Field.blockPx(z);
   const blocks = TILE / block;
-  const cells = Field.tileCells(weather.index, z, x, y, TILE, block);
+  const samples = Field.tileSamples(weather.index, z, x, y, TILE, block);
   for (const { sid, t } of arrays) {
     const memo = new Map(); // cellule → Map(classe → facteur)
-    for (let py = 0; py < TILE; py++) {
-      const rowBlock = Math.floor(py / block) * blocks;
-      for (let px = 0; px < TILE; px++) {
-        const i = py * TILE + px;
-        let v = t[i];
-        if (Number.isNaN(v)) continue;
-        const cell = cells[rowBlock + Math.floor(px / block)];
-        if (!cell) continue; // pas de météo pour ce pixel : transparent, jamais 0,5
-        const k = alt ? alt[i] : null;
-        let byClass = memo.get(cell);
-        if (!byClass) memo.set(cell, (byClass = new Map()));
-        let f = byClass.get(k);
-        if (f === undefined) {
-          f = Field.factor(cell, sid, date, Field.altCenter(cell, k, palette.alt_encoding));
-          byClass.set(k, f);
+    let k = null;
+    const cellFactor = (cell) => {
+      let byClass = memo.get(cell);
+      if (!byClass) memo.set(cell, (byClass = new Map()));
+      let f = byClass.get(k);
+      if (f === undefined) {
+        f = Field.factor(cell, sid, date, Field.altCenter(cell, k, palette.alt_encoding));
+        byClass.set(k, f);
+      }
+      return f;
+    };
+    for (let by = 0; by < blocks; by++) {
+      for (let bx = 0; bx < blocks; bx++) {
+        const sample = samples[by * blocks + bx];
+        if (!sample) continue; // pas de météo pour ce bloc : transparent, jamais 0,5
+        let lastK; // la classe change rarement dans un bloc : un seul facteur gardé
+        let f = null;
+        for (let py = by * block; py < (by + 1) * block; py++) {
+          for (let px = bx * block; px < (bx + 1) * block; px++) {
+            const i = py * TILE + px;
+            const T = t[i];
+            if (Number.isNaN(T)) continue;
+            k = alt ? alt[i] : null;
+            if (k !== lastK) {
+              f = Field.sampleFactor(sample, cellFactor);
+              lastK = k;
+            }
+            if (f === null) continue;
+            const v = T * f;
+            if (Number.isNaN(out[i]) || v > out[i]) out[i] = v;
+          }
         }
-        if (f === null) continue;
-        v *= f;
-        if (Number.isNaN(out[i]) || v > out[i]) out[i] = v;
       }
     }
   }
   return out;
 }
 
-/** M_eff × Φ de l'espèce pour un point et un indice de classe d'altitude (null = inconnu). */
-function weatherFactor(sid, lat, lon, k) {
-  const cell = Field.nearestCell(weather.index, lat, lon);
-  return cell ? Field.factor(cell, sid, currentDate(), Field.altCenter(cell, k, palette.alt_encoding)) : null;
+/** M_eff × Φ de l'espèce, interpolé au point, pour un jour et un indice de classe d'altitude
+ *  (null = inconnu). */
+function weatherFactor(sid, lat, lon, k, date = currentDate()) {
+  return Field.pointFactor(weather.index, sid, date, lat, lon, k, palette.alt_encoding);
 }
 
 /** Le jour de la carte : toujours aujourd'hui (`today` de l'API), null avant la première réponse. */
@@ -716,7 +731,8 @@ async function fetchWeather() {
     weather.computedAt = body.computed_at ?? null;
     weather.error = null;
     const got = useField ? Field.mergeField(weather.cells, body) : Field.mergeBbox(weather.cells, body);
-    weather.index = Field.buildIndex(weather.cells);
+    if (!useField) weather.unavailable = got.unavailable;
+    weather.index = Field.buildIndex(weather.cells, weather.unavailable);
     if (useField) {
       // servi depuis le précalcul : les cellules manquantes arriveront avec la prochaine
       // pré-chauffe, le TTL suffit à les redemander
@@ -1008,16 +1024,22 @@ async function fetchPoint(cellId, sids) {
 }
 
 /** Les onze jours d'un point : pour chaque jour, max sur les espèces de T × M_eff × Φ à la classe
- *  d'altitude du pixel (règle 9) ; null quand aucune espèce n'a de météo ce jour-là. */
-function pointDays(body, tBySid, altKey) {
+ *  d'altitude du pixel (règle 9) ; null quand aucune espèce n'a de météo ce jour-là. M_eff × Φ
+ *  est interpolé au point comme sur la carte quand les cellules voisines ont ce jour (au-dessus
+ *  de FIELD_ZOOM, /weather/bbox les donne tous) ; sinon c'est celui de la cellule du point. */
+function pointDays(body, tBySid, altKey, lat, lon, altIdx) {
   const dates = new Set();
   for (const sid of Object.keys(tBySid)) for (const row of body.species?.[sid] ?? []) dates.add(row.date);
   return [...dates].sort().map((iso) => {
     let value = null;
     for (const [sid, T] of Object.entries(tBySid)) {
-      const cls = body.species?.[sid]?.find((d) => d.date === iso)?.by_alt?.[altKey];
-      if (!cls || cls.M_eff === undefined || cls.phi === undefined) continue;
-      const v = T * cls.M_eff * cls.phi;
+      let f = weatherFactor(sid, lat, lon, altIdx, iso);
+      if (f === null) {
+        const cls = body.species?.[sid]?.find((d) => d.date === iso)?.by_alt?.[altKey];
+        if (!cls || cls.M_eff === undefined || cls.phi === undefined) continue;
+        f = cls.M_eff * cls.phi;
+      }
+      const v = T * f;
       if (value === null || v > value) value = v;
     }
     return { iso, value };
@@ -1082,8 +1104,9 @@ map.on("click", async (e) => {
     if (f && shown && token === probeToken) show(shown);
   });
   // sous FIELD_ZOOM, M_eff × Φ vient du champ du jour ; les phrases et les facteurs, de
-  // GET /weather?cell= dans les deux cas
-  const cell = Field.nearestCell(weather.index, e.lngLat.lat, e.lngLat.lng);
+  // GET /weather?cell= dans les deux cas : ce sont ceux de la cellule qui porte le point, alors
+  // que le score est interpolé entre les cellules voisines, comme la couleur de la carte
+  const cell = Field.sample(weather.index, e.lngLat.lat, e.lngLat.lng).home;
   const w = best.v / best.T;
   const altKey = String(Field.altCenter(cell, altIdx, palette.alt_encoding));
   const altTxt = altLayer && altIdx !== null && altIdx !== nodata ? "" : " (médiane cellule)";
@@ -1101,10 +1124,11 @@ map.on("click", async (e) => {
     value: best.v,
     name,
     phrases: [terrainPhrase(best.T), ...summary],
-    days: body ? pointDays(body, tBySid, altKey) : null,
+    days: body ? pointDays(body, tBySid, altKey, e.lngLat.lat, e.lngLat.lng, altIdx) : null,
     details:
-      `S = ${best.v.toFixed(3)} · T ${best.T.toFixed(2)} × M_eff·Φ ${w.toFixed(2)} · cellule ${cell.id}` +
-      ` · classe ${altKey} m${altTxt}${cell.stale ? " · météo périmée" : ""}\n${factorsTxt}`,
+      `S = ${best.v.toFixed(3)} · T ${best.T.toFixed(2)} × M_eff·Φ ${w.toFixed(2)} (interpolé entre cellules voisines)` +
+      ` · classe ${altKey} m${altTxt}${cell.stale ? " · météo périmée" : ""}\n` +
+      `Facteurs de la cellule ${cell.id} : ${factorsTxt}`,
   });
 });
 
