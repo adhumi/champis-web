@@ -1,0 +1,29 @@
+# Dependabot : une passe par semaine et par écosystème, mises à jour groupées pour limiter le bruit.
+# Les actions de la CI et l'image du Dockerfile sont épinglées par SHA ou par condensé : Dependabot
+# relève l'épingle et la version ensemble. La CLI Railway (version fixe dans .github/workflows/ci.yml)
+# et les bibliothèques de web/vendor/ (copiées à la main, voir web/vendor/README.md) ne sont pas
+# suivies : elles se relèvent à la main.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Outils de test et de lint (pyproject.toml, groupe dev ; uv.lock)
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+
+  # Image Caddy du Dockerfile
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

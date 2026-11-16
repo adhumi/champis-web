@@ -1,6 +1,6 @@
 # Composants tiers
 
-Ce que le site `champis.app` distribue ou utilise et qui n'est pas de Champis. Le code de ce dépôt est sous licence MIT (`LICENSE`) ; les fichiers du référentiel (`champis/`, sous-module `adhumi/champis` : espèces, palette, textes, illustrations) sous licence CC BY 4.0.
+Ce que le site `champis.app` distribue ou utilise et qui n'est pas de Champis. Le code de ce dépôt est sous licence MIT (`LICENSE`) ; les fichiers du référentiel (`champis/`, sous-module `adhumi/champis` : espèces, palette, textes, illustrations) sous licence CC BY 4.0, sauf les photos des fiches (`shared/photos/`), copies de Wikimedia Commons qui gardent la licence de leur auteur (`champis/LICENSE-DATA.md`).
 
 ## Bibliothèques servies par le site (`web/vendor/`)
 
