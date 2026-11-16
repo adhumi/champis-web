@@ -33,7 +33,7 @@ Seule la branche `main`, celle qui est déployée, reçoit des correctifs.
 
 Ces points sont des choix, décrits dans `docs/web.md` et dans le `Caddyfile` :
 
-- **Le site est statique et sans compte.** Il ne pose aucun cookie et ne stocke aucune donnée d'un visiteur. Tout ce qu'il sert est public, fichiers du référentiel compris (`/shared/`, `/species/`).
+- **Le site est statique et sans compte.** Il ne pose aucun cookie et ne stocke aucune donnée d'un visiteur sur le serveur. Le navigateur garde une seule valeur, la dernière vue de la carte (`localStorage`, clé `champis.carte.vue` : zoom et centre arrondis), qui n'est jamais envoyée ; elle est validée à la relecture. Tout ce qu'il sert est public, fichiers du référentiel compris (`/shared/`, `/species/`).
 - **`?api=` et `?tiles=` changent la source des données sur un poste local seulement** (`localhost`, `127.0.0.1`, `[::1]`). Sur `champis.app` ils sont ignorés ; qu'ils le soient est voulu, qu'ils ne le soient pas serait une faille.
 - **La CSP autorise les styles en ligne** (`style-src 'unsafe-inline'`), pour les blocs `<style>` des pages et le rendu de la légende. Les scripts en ligne, eux, sont interdits.
 - **Le navigateur appelle des tiers nommés** : la Géoplateforme de l'IGN et, si on choisit ce fond, OpenStreetMap. L'article « Confidentialité » du site le dit.

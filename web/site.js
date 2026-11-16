@@ -277,6 +277,89 @@
   }
   const isDev = (search) => new URLSearchParams(search).get("dev") === "1";
 
+  // ------------------------------------------------------------ vue de la carte (16 nov. 2026)
+  /* « Centrer sur la France au premier lancement et mémoriser la dernière position vue » : la
+   * dernière vue (zoom, latitude, longitude, arrondis ; rien d'autre) est gardée dans le
+   * `localStorage` du navigateur, sous une seule clé. Pas de cookie : rien n'est envoyé à un
+   * serveur. À l'ouverture, la position de l'URL (`#zoom/lat/lon`) l'emporte, puis la vue
+   * mémorisée, puis la France métropolitaine entière. */
+  const VIEW_KEY = "champis.carte.vue";
+  const VIEW_VERSION = 1;
+  /** France métropolitaine, Corse comprise : [ouest, sud, est, nord], d'Ouessant à la plaine
+   *  orientale corse, du sud de Bonifacio à Bray-Dunes, avec une marge. */
+  const FRANCE_BOUNDS = [-5.3, 41.2, 9.7, 51.2];
+  /** Bornes d'une vue : le zoom minimal de la carte (en dessous de 4, plus aucune tuile à colorer),
+   *  le zoom maximal de MapLibre, et la latitude où s'arrête la projection de la carte. */
+  const VIEW_LIMITS = { minZoom: 4, maxZoom: 22, maxLat: 85.051129 };
+  const round = (x, digits) => Math.round(x * 10 ** digits) / 10 ** digits;
+  /** Une vue { zoom, lat, lon } aux nombres finis et dans les bornes de la carte, arrondie (zoom au
+   *  centième, position à 1e-4°, ≈ 10 m), ou null. */
+  function checkedView(v, limits = VIEW_LIMITS) {
+    if (!v || typeof v !== "object") return null;
+    const { zoom, lat, lon } = v;
+    if (![zoom, lat, lon].every((x) => typeof x === "number" && Number.isFinite(x))) return null;
+    if (zoom < limits.minZoom || zoom > limits.maxZoom) return null;
+    if (Math.abs(lat) > limits.maxLat || Math.abs(lon) > 180) return null;
+    return { zoom: round(zoom, 2), lat: round(lat, 4), lon: round(lon, 4) };
+  }
+  /** Texte écrit sous VIEW_KEY : `{"v":1,"zoom":…,"lat":…,"lon":…}`, ou null pour une vue invalide. */
+  function serializeView(view, limits = VIEW_LIMITS) {
+    const v = checkedView(view, limits);
+    return v ? JSON.stringify({ v: VIEW_VERSION, zoom: v.zoom, lat: v.lat, lon: v.lon }) : null;
+  }
+  /** Vue relue du texte mémorisé, ou null : texte absent, illisible, d'une autre version, ou vue
+   *  hors des bornes de la carte. */
+  function parseView(text, limits = VIEW_LIMITS) {
+    if (typeof text !== "string") return null;
+    let o;
+    try {
+      o = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    return o && typeof o === "object" && o.v === VIEW_VERSION ? checkedView(o, limits) : null;
+  }
+  /** Position portée par l'URL (`#zoom/lat/lon`, puis cap et inclinaison éventuels), ou null. Même
+   *  règle que MapLibre (`hash: true`), qui l'applique lui-même : au moins trois champs, tous des
+   *  nombres. */
+  function hashView(hash) {
+    const parts = String(hash ?? "").replace(/^#/, "").split("/");
+    if (parts.length < 3 || parts.some((p) => isNaN(p))) return null;
+    return { zoom: +parts[0], lat: +parts[1], lon: +parts[2] };
+  }
+  /** Vue d'ouverture de la carte, par ordre de priorité : l'URL (`source: "url"`, MapLibre la lit),
+   *  la vue mémorisée (`"memoire"`, avec `zoom`, `lat`, `lon`), sinon la France entière (`"france"`,
+   *  avec `bounds` à cadrer dans la fenêtre). */
+  function initialView(hash, stored, limits = VIEW_LIMITS) {
+    if (hashView(hash)) return { source: "url" };
+    const view = parseView(stored, limits);
+    if (view) return { source: "memoire", ...view };
+    return { source: "france", bounds: FRANCE_BOUNDS };
+  }
+  /* Accès au stockage : `localStorage` peut manquer ou lever (navigation privée, quota, réglages du
+   * navigateur), à la lecture de la propriété comme à l'appel. Tout échec est silencieux : la
+   * carte s'ouvre alors sur la France et ne mémorise rien. */
+  const browserStorage = () => root.localStorage;
+  /** Texte mémorisé sous VIEW_KEY, ou null. */
+  function readStoredView(storage = browserStorage) {
+    try {
+      return storage().getItem(VIEW_KEY);
+    } catch {
+      return null;
+    }
+  }
+  /** Écrit la vue sous VIEW_KEY ; renvoie le texte écrit, ou null si rien n'a été écrit. */
+  function storeView(view, storage = browserStorage, limits = VIEW_LIMITS) {
+    const text = serializeView(view, limits);
+    if (!text) return null;
+    try {
+      storage().setItem(VIEW_KEY, text);
+      return text;
+    } catch {
+      return null;
+    }
+  }
+
   // ------------------------------------------------------------ navigateur seulement
   /* Barre du téléphone : trois entrées (étape A, 6 nov. 2026), deux tant que Soutenir est masqué.
    * Sur ordinateur, Soutenir est à droite de l'en-tête, hors de la navigation. */
@@ -385,6 +468,7 @@
     trend, trendPhrase, geocodeUrl, geocodeResults, forestUrl, forestPhrase,
     hexToRgb, safeHex, isSpeciesId, sortedClasses, classify, pixelColor, accentHex, classCounts, seasonSentence,
     esc, inline, renderMarkdown, markdownTitle, apiBase, isLocal, isDev,
+    VIEW_KEY, VIEW_VERSION, FRANCE_BOUNDS, VIEW_LIMITS, serializeView, parseView, hashView, initialView, readStoredView, storeView,
     layerItems, renderNav, applyAccent, loadPalette, renderLegend, renderDayDots,
   };
   root.Site = Site;

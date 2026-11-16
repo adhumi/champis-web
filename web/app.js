@@ -15,6 +15,14 @@
 const TILE = 256;
 const MIN_ZOOM = 6;
 const MAX_ZOOM = 15;
+// Vue d'ensemble (16 nov. 2026) : la France entière ne tient dans une fenêtre qu'autour du zoom 4
+// (téléphone) à 5,5 (grand écran). Une tuile de 256 px du niveau MIN_ZOOM colore la carte à partir
+// du zoom 5 ; en dessous, les mêmes tuiles du niveau MIN_ZOOM sont dessinées en 128 px (source
+// « T-loin »), jusqu'au zoom minimal de la carte (Site.VIEW_LIMITS.minZoom).
+const FAR_TILE = 128;
+const FAR_BELOW_ZOOM = MIN_ZOOM - 1;
+// Marges du cadrage de la France : la barre flottante en haut, la ligne du jour en bas.
+const FRANCE_PADDING = { top: 76, bottom: 44, left: 16, right: 16 };
 
 const BASEMAPS = {
   plan: {
@@ -95,8 +103,10 @@ const TILE_RETRY_MS = [1500, 3000, 6000];
 const WEATHER_TTL_MS = 30 * 60 * 1000; // une emprise contenue dans la dernière réponse ne redemande rien
 const WEATHER_PAD = 0.1; // marge (°) autour de l'emprise visible : ~ une cellule pour le voisin le plus proche en bord d'écran
 const DEV = Site.isDev(location.search);
-// Vue partagée (`#zoom/lat/lon`) : lue avant que MapLibre n'écrive le sien, on ne la recadre pas.
-const SHARED_VIEW = location.hash.length > 1;
+// Vue d'ouverture (16 nov. 2026), lue avant que MapLibre n'écrive son hash : la position de l'URL
+// (`#zoom/lat/lon`, vue partagée), sinon la dernière vue mémorisée dans ce navigateur
+// (`localStorage`, clé Site.VIEW_KEY), sinon la France entière. Seule cette dernière se recadre.
+const START = Site.initialView(location.hash, Site.readStoredView());
 
 // ---------------------------------------------------------------- navigation et panneau
 
@@ -434,12 +444,22 @@ function noteRender(combineMs, paintMs) {
 
 // ---------------------------------------------------------------- carte
 
+/** Emprise de la France métropolitaine (Site.FRANCE_BOUNDS) pour MapLibre : [[ouest, sud], [est, nord]]. */
+function franceBounds() {
+  const [w, s, e, n] = Site.FRANCE_BOUNDS;
+  return [[w, s], [e, n]];
+}
+
 const map = new maplibregl.Map({
   container: "map",
   style: { version: 8, sources: {}, layers: [] },
-  center: [6.35, 47.1], // Doubs
-  zoom: 9,
-  minZoom: MIN_ZOOM, // les tuiles T existent dès le niveau 6 : en dessous, rien à colorer
+  // la vue mémorisée, sinon la France cadrée dans la fenêtre ; une position dans l'URL passe
+  // devant l'une comme l'autre (`hash: true`, MapLibre l'applique lui-même)
+  ...(START.source === "memoire"
+    ? { center: [START.lon, START.lat], zoom: START.zoom }
+    : { bounds: franceBounds(), fitBoundsOptions: { padding: FRANCE_PADDING } }),
+  // les tuiles T commencent au niveau 6, dessinées jusqu'au zoom 4 (FAR_TILE) : en dessous, rien à colorer
+  minZoom: Site.VIEW_LIMITS.minZoom,
   hash: true,
   attributionControl: { compact: false },
 });
@@ -528,9 +548,10 @@ function setBasemap(name) {
 const frenchDate = Site.frenchDate;
 
 /** Couche de tuiles à (re)rendre pour la clé, le jour, le mode et la météo courants, visible à
- *  tout zoom ≥ MIN_ZOOM. La source n'est jamais recréée : `setTiles` avec une nouvelle version
- *  fait recharger les tuiles en gardant l'image précédente à l'écran jusqu'à la suivante (plus de
- *  carte vidée carré par carré), et les octets viennent du cache mémoire. */
+ *  tout zoom de la carte (sous le zoom 5 par « T-loin »). La source n'est jamais recréée :
+ *  `setTiles` avec une nouvelle version fait recharger les tuiles en gardant l'image précédente à
+ *  l'écran jusqu'à la suivante (plus de carte vidée carré par carré), et les octets viennent du
+ *  cache mémoire. */
 function setLayer(key) {
   currentKey = key;
   if (!key) return;
@@ -538,14 +559,14 @@ function setLayer(key) {
   const src = map.getSource("T");
   if (src) {
     src.setTiles([url]);
+    map.getSource("T-loin").setTiles([url]);
   } else {
+    const paint = { "raster-opacity": OPACITY, "raster-resampling": "nearest" };
     map.addSource("T", { type: "raster", tiles: [url], tileSize: TILE, minzoom: MIN_ZOOM, maxzoom: MAX_ZOOM });
-    map.addLayer({
-      id: "T",
-      type: "raster",
-      source: "T",
-      paint: { "raster-opacity": OPACITY, "raster-resampling": "nearest" },
-    });
+    map.addLayer({ id: "T", type: "raster", source: "T", minzoom: FAR_BELOW_ZOOM, paint });
+    // sous le zoom 5 : les tuiles du niveau MIN_ZOOM, les mêmes octets, dessinées deux fois plus petit
+    map.addSource("T-loin", { type: "raster", tiles: [url], tileSize: FAR_TILE, minzoom: MIN_ZOOM, maxzoom: MIN_ZOOM });
+    map.addLayer({ id: "T-loin", type: "raster", source: "T-loin", maxzoom: FAR_BELOW_ZOOM, paint });
   }
 }
 
@@ -674,10 +695,32 @@ document.addEventListener("pointerdown", (e) => {
 $("api").value = Site.apiBase(location);
 $("api").addEventListener("change", fetchWeather);
 let moveTimer = null;
-map.on("moveend", () => {
+map.on("moveend", (e) => {
   clearTimeout(moveTimer);
   moveTimer = setTimeout(fetchWeather, 300);
+  rememberView(e);
 });
+
+/** Vue courante de la carte : ce qui se mémorise (Site.serializeView l'arrondit). */
+function currentView() {
+  const c = map.getCenter().wrap();
+  return { zoom: map.getZoom(), lat: c.lat, lon: c.lng };
+}
+// Dernière vue connue : celle de l'ouverture, puis chaque vue écrite. Rien n'est écrit tant que la
+// vue n'a pas changé : ouvrir un lien partagé, ou redimensionner la fenêtre, ne remplace pas la vue
+// mémorisée ; le premier déplacement le fait.
+let knownView = Site.serializeView(currentView());
+/** Fin d'un déplacement (jamais pendant) : la vue est écrite dans le `localStorage` du navigateur,
+ *  sous Site.VIEW_KEY. Rien d'autre n'y est écrit, rien n'est envoyé ; un stockage absent ou qui
+ *  refuse est ignoré (Site.storeView). Le cadrage automatique d'un jeu (`auto`) ne compte pas. */
+function rememberView(e) {
+  if (e.auto) return;
+  const view = currentView();
+  const text = Site.serializeView(view);
+  if (!text || text === knownView) return;
+  knownView = text;
+  Site.storeView(view);
+}
 
 
 // ---------------------------------------------------------------- météo (API)
@@ -865,14 +908,14 @@ async function addMany(items) {
     }
   }
   refreshLayerList();
-  if (first && species.size > 0 && !SHARED_VIEW) {
-    // La carte s'ouvre sur la vue de départ (le Doubs, à un zoom où la parcelle se lit) si le jeu
-    // la couvre, sinon elle cadre le jeu (un seul département, par exemple) : la carte est colorée
-    // à tout zoom ≥ MIN_ZOOM (minZoom de la carte), plus besoin de borner le cadrage au zoom 9.
+  if (first && species.size > 0 && START.source === "france") {
+    // La carte s'ouvre sur la France entière si le jeu en couvre le centre, sinon elle cadre le jeu
+    // (un seul département, par exemple) : la carte est colorée à tout zoom de la carte. Une vue
+    // de l'URL ou mémorisée ne se recadre pas, et ce cadrage automatique ne se mémorise pas.
     const b = [...species.values()][0].bounds;
     const c = map.getCenter();
     const covered = c.lng >= b[0] && c.lng <= b[2] && c.lat >= b[1] && c.lat <= b[3];
-    if (!covered) map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 20, duration: 0 });
+    if (!covered) map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 20, duration: 0 }, { auto: true });
   }
   $("status").textContent = [
     `${species.size} espèce(s) : ${[...species.values()].map((s) => s.names.fr).join(", ")}`,
