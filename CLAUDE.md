@@ -1,6 +1,6 @@
 # Champis — le site champis.app
 
-Site de Champis : accueil, carte, Guide, soutenir. Pages statiques sans build, MapLibre et PMTiles servis depuis `web/vendor/`. La spec vit dans le doc « Spec — Champis » ; le référentiel `adhumi/champis` (espèces, palette, textes du Guide) est le sous-module `champis/`, et ses skills (`champis-model`, `scoring-parity`, `spec-sync`) sont dans `.claude/skills/` par lien.
+Site de Champis : accueil, carte, Guide, soutenir. Pages statiques sans build, MapLibre et PMTiles servis depuis `web/vendor/`. La spec vit dans le doc « Spec — Champis » ; le référentiel `adhumi/champis` (espèces, palette, textes du Guide) est le sous-module `champis/`, et ses skills (`champis-model`, `scoring-parity`, `spec-sync`, `roadmap`) sont dans `.claude/skills/` par lien.
 
 Découpage des dépôts (spec › Produit › Étape C, lot C7, 6 nov. 2026) : ce dépôt est `adhumi/champis-web`, servi par un service statique Railway (Caddy) sur `champis.app` ; l'API est `adhumi/champis-api` sur `api.champis.app` ; l'app est `adhumi/champis-ios`.
 
@@ -35,3 +35,4 @@ scripts/      smoke.sh : contrôle d'un site qui tourne (CI sur l'image, `make s
 - Aucune requête vers un tiers non nécessaire (spec › Mesure minimale) : pas de CDN, pas de police ou de script externe ; seuls l'IGN (fond Plan IGN, recherche, forêts publiques) et OpenStreetMap si on le choisit.
 - `web/tests/pngtiles.py` encode les PNG exactement comme le pipeline : un changement d'encodage côté champis-api se reporte ici.
 - Toute décision structurante passe par la spec avant le code (skill `spec-sync`) ; en cas de doute, demander à Adrien.
+- Les issues GitHub sont la source de vérité de ce qui reste à faire (décision du 17 nov. 2026, skill `roadmap`) : lire les issues ouvertes de ce dépôt, et celles de `adhumi/champis` pour les sujets transverses, avant de commencer une tâche ; tout ce qui est remis à plus tard, découvert en chemin ou laissé hors périmètre devient une issue, jamais un « reste à faire » dans un message, un README ou un commentaire ; une PR cite son issue (`Closes #N`). Jamais de faille non corrigée, de secret ni de coût dans une issue : elles seront publiques.
