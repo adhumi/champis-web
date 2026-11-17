@@ -290,7 +290,12 @@ function layerSpecies(key) {
  *  résultat a la même forme dans les deux cas, `combine`, la colorisation et la sonde au clic ne
  *  voient pas la différence. */
 async function speciesT(key, z, x, y) {
-  const list = layerSpecies(key);
+  return tilesFor(layerSpecies(key), z, x, y);
+}
+
+/** Comme `speciesT`, pour une liste d'espèces quelconque : la fiche d'un point lit ainsi le
+ *  terrain de toutes les espèces servies (17 nov. 2026), une lecture par fichier G. */
+async function tilesFor(list, z, x, y) {
   const { grouped, single } = Groups.plan(list.map((s) => s.id), groups.values());
   const reads = [
     ...grouped.map(({ group, picks }) =>
@@ -1052,26 +1057,78 @@ function terrainPhrase(t) {
 
 const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-/** Fiche en clair (lot 2) : libellé et jour, espèce, phrases, les onze jours du point (étape A,
- *  en lecture seule : la carte reste sur aujourd'hui) avec leur tendance (étape B2), le statut de
- *  la forêt (étape B5), puis les chiffres derrière Détails. */
-function renderProbe({ value, name, phrases, details, days = null, forest = null }) {
+/** Pastille et libellé de palette d'une valeur ; sans valeur, « … » pendant le chargement de la
+ *  météo, « sans météo » ensuite. Jamais de chiffre ici. */
+function scoreHtml(value, pending) {
+  if (value === null) return `<span class="lbl">${pending ? "…" : "sans météo"}</span>`;
+  const cls = classify(value);
+  return `<span class="dot" style="background:${Site.safeHex(cls.hex)}"></span><span class="lbl">${esc(cls.fr)}</span>`;
+}
+
+/** Les autres espèces du point, par famille (`Site.pointFamilies`) : vignette, nom français, nom
+ *  latin, pastille et libellé du score du jour ; chaque ligne est un bouton qui met l'espèce en
+ *  avant dans la fiche. */
+function familiesHtml(families, pending) {
+  return families
+    .map(
+      (f) =>
+        `<h3>${esc(f.title)}</h3><ul class="others">` +
+        f.species
+          .map(
+            (it) =>
+              `<li><button type="button" data-sid="${esc(it.id)}">` +
+              `<img class="thumb" src="${illustration(it.id)}" alt="" loading="lazy" decoding="async" />` +
+              `<span class="names"><span class="fr">${esc(it.fr)}</span>` +
+              (it.la ? `<span class="la"><i>${esc(it.la)}</i></span>` : "") +
+              `</span>${scoreHtml(it.value, pending)}</button></li>`
+          )
+          .join("") +
+        `</ul>`
+    )
+    .join("");
+}
+
+/** Fiche en clair (lot 2) : libellé et jour, espèce mise en avant, une phrase rédigée (17 nov.
+ *  2026 : terrain puis `sentence` de l'API ; `phrases` = la liste d'avant, d'une API plus
+ *  ancienne), les onze jours du point (étape A, en lecture seule : la carte reste sur aujourd'hui)
+ *  avec leur tendance (étape B2), le statut de la forêt (étape B5), les autres espèces du point
+ *  par famille, puis les chiffres derrière Détails. Sans espèce en avant (`sid` nul : la couche
+ *  n'a rien ici), `message` puis les autres espèces. `onFeature(sid)` : clic sur une ligne. */
+function renderProbe({
+  sid = null, value = null, name = "", latin = "", sentence = "", phrases = [], details = "", days = null,
+  forest = null, families = [], pending = false, message = "", onFeature = null,
+}) {
   const good = classes.find((c) => c.label === "bon")?.min ?? 1;
   const trendText = days ? Site.trendPhrase(Site.trend(days, weather.today, good)) : null;
-  const cls = classify(value);
   const when = currentDate() ? Site.whenWord(currentDate(), weather.today) : "";
   const sub = [name, currentDate() ? frenchDate(currentDate()) : ""].filter(Boolean).join(" · ");
+  const title =
+    value === null
+      ? `<h2>Sans météo ${esc(when)}</h2>`
+      : `<h2><span class="dot" style="background:${Site.safeHex(classify(value).hex)}"></span>${esc(classify(value).fr)} ${esc(when)}</h2>`;
+  const lead =
+    sid === null
+      ? `<p class="sentence">${esc(message)}</p>`
+      : `<div class="lead"><img class="thumb" src="${illustration(sid)}" alt="" />` +
+        `<div>${title}<div class="sub">${esc(sub)}</div>` +
+        (latin ? `<div class="la"><i>${esc(latin)}</i></div>` : "") +
+        `</div></div>` +
+        `<p class="sentence">${esc(sentence)}</p>` +
+        (phrases.length ? `<ul>${phrases.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : "") +
+        (days ? `<div id="probe-days" aria-label="Les onze jours de ce point"></div>` : "") +
+        (trendText ? `<p class="trend">Tendance : ${esc(trendText)}</p>` : "");
   probe.innerHTML =
-    `<h2><span class="dot" style="background:${Site.safeHex(cls.hex)}"></span>${esc(cls.fr)} ${esc(when)}</h2>` +
-    `<div class="sub">${esc(sub)}</div>` +
-    (phrases.length ? `<ul>${phrases.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : "") +
-    (days ? `<div id="probe-days" aria-label="Les onze jours de ce point"></div>` : "") +
-    (trendText ? `<p class="trend">Tendance : ${esc(trendText)}</p>` : "") +
+    lead +
     (forest ? `<p class="forest">${esc(forest)}</p>` : "") +
-    `<details><summary>Détails</summary><div>${esc(details)}</div></details>` +
+    familiesHtml(families, pending) +
+    (sid === null ? "" : `<details><summary>Détails</summary><div>${esc(details)}</div></details>`) +
     `<button type="button" class="button quiet small" id="probe-close">Fermer</button>`;
   $("probe-close").addEventListener("click", () => (probe.style.display = "none"));
-  if (days) Site.renderDayDots($("probe-days"), { today: weather.today, days, classes });
+  probe.querySelectorAll("img").forEach(hideBrokenThumb);
+  if (onFeature) {
+    probe.querySelectorAll("button[data-sid]").forEach((b) => b.addEventListener("click", () => onFeature(b.dataset.sid)));
+  }
+  if (sid !== null && days) Site.renderDayDots($("probe-days"), { today: weather.today, days, classes });
 }
 
 /** `GET /weather?cell=` pour toutes les espèces du point en une requête : onze jours par espèce et
@@ -1119,6 +1176,72 @@ async function fetchForest(lat, lon) {
   }
 }
 
+/** Les espèces du point pour la fiche : celles qui ont du terrain ici, avec leur score du jour.
+ *  Une espèce de la couche garde la valeur de la carte (`layerV`, interpolée entre cellules) ; les
+ *  autres ont T × M_eff × Φ de la cellule qui porte le point, à la classe d'altitude du pixel
+ *  (`GET /weather?cell=`), null tant que la réponse n'est pas là ou si elle n'a pas l'espèce. */
+function probeItems(st) {
+  const date = currentDate();
+  return Object.entries(st.allT).map(([sid, T]) => {
+    const s = species.get(sid);
+    let value = st.layerV[sid] ?? null;
+    if (value === null) {
+      const cls = st.body?.species?.[sid]?.find((d) => d.date === date)?.by_alt?.[st.altKey];
+      if (cls && cls.M_eff !== undefined && cls.phi !== undefined) value = T * cls.M_eff * cls.phi;
+    }
+    return { id: sid, fr: s?.names.fr ?? sid, la: s?.names.la ?? "", group: s?.group ?? null, T, value };
+  });
+}
+
+/** Affiche la fiche d'un point depuis son état `st` : l'espèce mise en avant (celle dont on a
+ *  cliqué la ligne, sinon celle qui porte le score de la couche) avec sa phrase, ses onze jours et
+ *  ses détails, puis les autres espèces par famille. La couche de la carte ne change pas. */
+function showProbe(st) {
+  const items = probeItems(st);
+  const sid = st.featured ?? st.best?.sid ?? null;
+  const item = sid === null ? null : items.find((it) => it.id === sid) ?? null;
+  const pending = st.cell !== null && st.body === undefined;
+  const onFeature = (id) => {
+    if (st.token !== probeToken) return;
+    st.featured = id === st.best?.sid ? null : id;
+    showProbe(st);
+  };
+  const common = { forest: st.forest, families: Site.pointFamilies(items, item ? sid : null), pending, onFeature };
+  if (!item) {
+    renderProbe({ ...common, message: st.message });
+    return;
+  }
+  const isLead = sid === st.best?.sid;
+  const { nodata } = altEnc();
+  const row = st.body?.species?.[sid]?.find((d) => d.date === currentDate())?.by_alt?.[st.altKey];
+  const text = Site.pointSentence(terrainPhrase(item.T), row?.sentence, pending ? ["météo : chargement…"] : row?.summary);
+  const factors = row?.factors ?? null;
+  const factorsTxt = factors
+    ? Object.entries(factors).filter(([k]) => k !== "M").map(([k, v]) => `${k} ${(+v).toFixed(2)}`).join(" · ")
+    : "facteurs indisponibles";
+  const altTxt = altLayer && st.altIdx !== null && st.altIdx !== nodata ? "" : " (médiane cellule)";
+  const where =
+    altLayer?.fine && st.altIdx !== null && st.altIdx !== nodata
+      ? `altitude ${Field.elevation(st.altIdx, altEnc().step_m)} m${isLead ? ", entre classes" : `, classe ${st.altKey} m`}`
+      : `classe ${st.altKey} m${altTxt}`;
+  const how = isLead
+    ? "interpolé entre cellules voisines"
+    : "cellule du point, sans interpolation avec ses voisines : peut différer d'un cran de la couleur qu'aurait la carte";
+  const details =
+    st.body === undefined
+      ? "…"
+      : (item.value === null
+          ? `T ${item.T.toFixed(2)} · pas de météo pour cette espèce`
+          : `S = ${item.value.toFixed(3)} · T ${item.T.toFixed(2)} × M_eff·Φ ${(item.T > 0 ? item.value / item.T : 0).toFixed(2)} (${how})`) +
+        ` · ${where}${st.cell?.stale ? " · météo périmée" : ""}\n` +
+        `Facteurs de la cellule ${st.cell?.id ?? "?"} : ${factorsTxt}`;
+  // les onze jours : le max de la couche pour son espèce porteuse (règle 9), l'espèce seule sinon
+  const days = st.body ? pointDays(st.body, isLead ? st.tBySid : { [sid]: item.T }, st.altKey, st.lat, st.lon, st.altIdx) : null;
+  renderProbe({
+    ...common, sid, value: item.value, name: item.fr, latin: item.la, sentence: text.sentence, phrases: text.phrases, days, details,
+  });
+}
+
 map.on("click", async (e) => {
   if (!currentKey) return;
   const token = ++probeToken;
@@ -1130,67 +1253,66 @@ map.on("click", async (e) => {
   const tx = Math.floor(px / TILE);
   const ty = Math.floor(py / TILE);
   const i = Math.floor(py % TILE) * TILE + Math.floor(px % TILE);
-  const arrays = await speciesT(currentKey, z, tx, ty);
-  const altIdx = (await altTile(z, tx, ty))?.[i] ?? null;
+  // le terrain de toutes les espèces servies au pixel, pas seulement celles de la couche (17 nov.
+  // 2026) ; une tuile qui ne se lit pas pour une autre espèce l'écarte de la liste, sans plus
+  const layerIds = new Set(layerSpecies(currentKey).map((s) => s.id));
+  const others = [...species.values()].filter((s) => !layerIds.has(s.id));
+  const [arrays, otherArrays, altArr] = await Promise.all([
+    speciesT(currentKey, z, tx, ty),
+    tilesFor(others, z, tx, ty).catch(() => []),
+    altTile(z, tx, ty),
+  ]);
+  if (token !== probeToken) return;
+  const altIdx = altArr?.[i] ?? null;
   probe.style.display = "block";
   if (NARROW.matches) setPanel(false);
   // meilleure espèce du groupe au point cliqué (S = T × M_eff × Φ)
   let best = null;
+  const layerV = {};
   for (const { sid, t } of arrays) {
     const T = t[i];
     if (Number.isNaN(T)) continue;
     const w = weatherFactor(sid, e.lngLat.lat, e.lngLat.lng, altIdx);
     if (w === null) continue;
     const v = T * w;
+    layerV[sid] = v;
     if (!best || v > best.v) best = { sid, T, v };
   }
-  if (!best) {
-    probe.textContent = arrays.some((a) => !Number.isNaN(a.t[i]))
-      ? "Pas de météo pour ce secteur aujourd'hui : le serveur réessaie."
-      : "Hors forêt ou pas de donnée ici.";
-    return;
-  }
-  const name = species.get(best.sid)?.names.fr ?? best.sid;
-  const { nodata } = altEnc();
-  // statut de la forêt en parallèle : la fiche s'affiche sans l'attendre et le gagne à son arrivée
-  let shown = null;
-  let forest = null;
-  const show = (p) => {
-    shown = p;
-    renderProbe({ ...p, forest });
-  };
-  fetchForest(e.lngLat.lat, e.lngLat.lng).then((f) => {
-    forest = f;
-    if (f && shown && token === probeToken) show(shown);
-  });
+  const tBySid = Object.fromEntries(arrays.filter(({ t }) => !Number.isNaN(t[i])).map(({ sid, t }) => [sid, t[i]]));
+  const allT = Object.fromEntries(
+    [...arrays, ...otherArrays].map(({ sid, t }) => [sid, t[i]]).filter(([, T]) => !Number.isNaN(T) && T > 0)
+  );
+  if (best) allT[best.sid] = best.T;
   // sous FIELD_ZOOM, M_eff × Φ vient du champ du jour ; les phrases et les facteurs, de
   // GET /weather?cell= dans les deux cas : ce sont ceux de la cellule qui porte le point, alors
-  // que le score est interpolé entre les cellules voisines, comme la couleur de la carte
-  const cell = Field.sample(weather.index, e.lngLat.lat, e.lngLat.lng).home;
-  const w = best.v / best.T;
-  const altKey = String(Field.altCenter(cell, altIdx, altEnc()));
-  const altTxt = altLayer && altIdx !== null && altIdx !== nodata ? "" : " (médiane cellule)";
-  show({ value: best.v, name, phrases: [terrainPhrase(best.T), "météo : chargement…"], details: "…" });
-  const tBySid = Object.fromEntries(arrays.filter(({ t }) => !Number.isNaN(t[i])).map(({ sid, t }) => [sid, t[i]]));
-  const body = await fetchPoint(cell.id, Object.keys(tBySid)).catch(() => null);
-  if (token !== probeToken) return;
-  const row = body?.species?.[best.sid]?.find((d) => d.date === currentDate())?.by_alt?.[altKey];
-  const summary = row?.summary ?? [];
-  const factors = row?.factors ?? null;
-  const factorsTxt = factors
-    ? Object.entries(factors).filter(([k]) => k !== "M").map(([k, v]) => `${k} ${(+v).toFixed(2)}`).join(" · ")
-    : "facteurs indisponibles";
-  show({
-    value: best.v,
-    name,
-    phrases: [terrainPhrase(best.T), ...summary],
-    days: body ? pointDays(body, tBySid, altKey, e.lngLat.lat, e.lngLat.lng, altIdx) : null,
-    details:
-      `S = ${best.v.toFixed(3)} · T ${best.T.toFixed(2)} × M_eff·Φ ${w.toFixed(2)} (interpolé entre cellules voisines)` +
-      ` · ${altLayer?.fine && altIdx !== null && altIdx !== nodata ? `altitude ${Field.elevation(altIdx, altEnc().step_m)} m, entre classes` : `classe ${altKey} m${altTxt}`}` +
-      `${cell.stale ? " · météo périmée" : ""}\n` +
-      `Facteurs de la cellule ${cell.id} : ${factorsTxt}`,
+  // que le score de la couche est interpolé entre les cellules voisines, comme la couleur de la carte
+  const cell = Field.sample(weather.index, e.lngLat.lat, e.lngLat.lng)?.home ?? null;
+  const st = {
+    token, lat: e.lngLat.lat, lon: e.lngLat.lng, altIdx, cell, best, layerV, tBySid, allT,
+    altKey: cell ? String(Field.altCenter(cell, altIdx, altEnc())) : null,
+    body: cell ? undefined : null, // undefined : en cours ; null : pas de réponse
+    featured: null, forest: null,
+    message:
+      Object.keys(tBySid).length > 0
+        ? "Pas de météo pour ce secteur aujourd'hui : le serveur réessaie."
+        : "Pas de terrain ici pour l'espèce affichée sur la carte.",
+  };
+  if (!best && Object.keys(allT).length === 0) {
+    probe.textContent = Object.keys(tBySid).length > 0 ? st.message : "Hors forêt ou pas de donnée ici.";
+    return;
+  }
+  // statut de la forêt en parallèle : la fiche s'affiche sans l'attendre et le gagne à son arrivée
+  fetchForest(e.lngLat.lat, e.lngLat.lng).then((f) => {
+    st.forest = f;
+    if (f && token === probeToken) showProbe(st);
   });
+  showProbe(st);
+  if (!cell) return;
+  // une seule requête pour toutes les espèces du point : phrases, onze jours, facteurs
+  const body = await fetchPoint(cell.id, Object.keys(allT)).catch(() => null);
+  if (token !== probeToken) return;
+  st.body = body;
+  showProbe(st);
 });
 
 // ---------------------------------------------------------------- recherche de commune (étape B3)

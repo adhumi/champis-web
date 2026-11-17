@@ -398,3 +398,54 @@ def test_layer_items_without_group_or_latin_name():
     assert items == [
         {"value": "s:x_y", "fr": "Espèce seule", "la": "", "spp": False, "illustration": "x_y"}
     ]
+
+
+def test_point_sentence_puts_the_terrain_before_the_api_sentence():
+    """Fiche d'un point (spec › App iOS, 17 nov. 2026) : terrain, deux-points, `sentence` de
+    GET /weather et un point ; sans `sentence` (API plus ancienne), la liste `summary` reste."""
+    full, old, bare = call(
+        (
+            "pointSentence",
+            ["terrain très favorable", "le sol est bien humide, mais il a gelé", ["x"]],
+        ),
+        ("pointSentence", ["terrain moyen", None, ["sol sec", "fin de saison"]]),
+        ("pointSentence", ["terrain peu favorable", "", None]),
+    )
+    assert full == {
+        "sentence": "Terrain très favorable : le sol est bien humide, mais il a gelé.",
+        "phrases": [],
+    }
+    assert old == {"sentence": "Terrain moyen.", "phrases": ["sol sec", "fin de saison"]}
+    assert bare == {"sentence": "Terrain peu favorable.", "phrases": []}
+
+
+def test_point_families_put_the_featured_family_first_then_sort_by_score():
+    """Les autres espèces du point par famille : celle de l'espèce mise en avant d'abord, puis par
+    meilleur score ; l'espèce mise en avant n'est pas dans la liste ; sans score en dernier."""
+    cepes = {"id": "cepes", "fr": "Cèpes"}
+    girolles = {"id": "girolles", "fr": "Girolles"}
+    items = [
+        {"id": "edulis", "fr": "Cèpe de Bordeaux", "la": "Boletus edulis", "group": cepes, "value": 0.3},
+        {"id": "aereus", "fr": "Cèpe bronzé", "la": "Boletus aereus", "group": cepes, "value": 0.1},
+        {"id": "pinophilus", "fr": "Cèpe des pins", "la": "Boletus pinophilus", "group": cepes, "value": None},
+        {"id": "girolle", "fr": "Girolle", "la": "Cantharellus cibarius", "group": girolles, "value": 0.8},
+        {"id": "seule", "fr": "Espèce seule", "la": "", "group": None, "value": 0.5},
+    ]  # fmt: skip
+    lead, other, none = call(
+        ("pointFamilies", [items, "edulis"]),
+        ("pointFamilies", [items, "girolle"]),
+        ("pointFamilies", [items, None]),
+    )
+    ids = lambda fams: [(f["id"], [s["id"] for s in f["species"]]) for f in fams]  # noqa: E731
+    assert ids(lead) == [
+        ("cepes", ["aereus", "pinophilus"]),
+        ("girolles", ["girolle"]),
+        ("", ["seule"]),
+    ]
+    assert [f["title"] for f in lead] == ["Cèpes", "Girolles", "Autres espèces"]
+    assert ids(other) == [("", ["seule"]), ("cepes", ["edulis", "aereus", "pinophilus"])]
+    assert ids(none) == [
+        ("girolles", ["girolle"]),
+        ("", ["seule"]),
+        ("cepes", ["edulis", "aereus", "pinophilus"]),
+    ]

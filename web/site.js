@@ -47,6 +47,46 @@
     return items;
   }
 
+  // ------------------------------------------------------------ fiche d'un point (17 nov. 2026)
+  /** La phrase de la fiche (spec › App iOS › Fiche d'un point, toutes les espèces et une phrase) :
+   *  le terrain du pixel (`terrain`, « terrain très favorable », que l'API ne connaît pas), deux-
+   *  points, puis `sentence` de `GET /weather` et un point. Sans `sentence` (API plus ancienne), le
+   *  terrain seul et la liste `summary` à la suite (`phrases`). Même règle que `PointSheet.sentence`
+   *  de l'app. */
+  function pointSentence(terrain, sentence, summary) {
+    const lead = terrain.charAt(0).toUpperCase() + terrain.slice(1);
+    if (typeof sentence === "string" && sentence) return { sentence: `${lead} : ${sentence}.`, phrases: [] };
+    return { sentence: `${lead}.`, phrases: Array.isArray(summary) ? summary : [] };
+  }
+
+  /** Les autres espèces d'un point, par famille (groupe d'affichage du référentiel). `items` :
+   *  [{ id, fr, la, group: { id, fr } | null, value }] pour les espèces qui ont du terrain au
+   *  point, `value` = score du jour ou null sans météo. `featured` : l'espèce en tête de fiche,
+   *  absente de la liste. La famille de l'espèce mise en avant d'abord, puis les autres par meilleur
+   *  score décroissant ; dans une famille, par score décroissant, puis par nom ; sans score en
+   *  dernier. Même règle que `PointFamilies.families` de l'app. */
+  function pointFamilies(items, featured) {
+    const score = (v) => (typeof v === "number" ? v : -1);
+    const lead = items.find((it) => it.id === featured);
+    const leadGroup = lead ? (lead.group?.id ?? "") : null;
+    const byGroup = new Map();
+    for (const it of items) {
+      if (it.id === featured) continue;
+      const gid = it.group?.id ?? "";
+      if (!byGroup.has(gid)) byGroup.set(gid, { id: gid, title: it.group?.fr ?? "Autres espèces", species: [] });
+      byGroup.get(gid).species.push(it);
+    }
+    const families = [...byGroup.values()];
+    for (const f of families) {
+      f.species.sort((a, b) => score(b.value) - score(a.value) || a.fr.localeCompare(b.fr, "fr"));
+      f.best = Math.max(...f.species.map((it) => score(it.value)));
+    }
+    families.sort(
+      (a, b) => (b.id === leadGroup) - (a.id === leadGroup) || b.best - a.best || a.title.localeCompare(b.title, "fr")
+    );
+    return families.map(({ id, title, species }) => ({ id, title, species }));
+  }
+
   // ------------------------------------------------------------ dates (UTC midi : jamais de décalage)
   const parse = (iso) => new Date(iso + "T12:00:00Z");
   const weekdayName = (iso) => WEEKDAYS[parse(iso).getUTCDay()];
@@ -465,7 +505,7 @@
   const Site = {
     WEEKDAYS, SHORT_WEEKDAYS, DAY_RANGE, SUPPORT_URL, SUPPORT_VISIBLE, APP_LINE, CONTACT_EMAIL, API_URL,
     weekdayName, shortWeekday, frenchDate, shortDate, dateFor, whenWord, parisParts, computedPhrase, todayLine,
-    trend, trendPhrase, geocodeUrl, geocodeResults, forestUrl, forestPhrase,
+    trend, trendPhrase, pointSentence, pointFamilies, geocodeUrl, geocodeResults, forestUrl, forestPhrase,
     hexToRgb, safeHex, isSpeciesId, sortedClasses, classify, pixelColor, accentHex, classCounts, seasonSentence,
     esc, inline, renderMarkdown, markdownTitle, apiBase, isLocal, isDev,
     VIEW_KEY, VIEW_VERSION, FRANCE_BOUNDS, VIEW_LIMITS, serializeView, parseView, hashView, initialView, readStoredView, storeView,
