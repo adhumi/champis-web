@@ -24,7 +24,7 @@ jobs:
       # Le référentiel adhumi/champis est le sous-module champis/ ; tant qu'il est privé, le jeton
       # par défaut ne le lit pas : CHAMPIS_REFERENTIEL_TOKEN (jeton à granularité fine, lecture du
       # contenu de adhumi/champis seulement). Une fois le dépôt public, le secret devient inutile.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -44,11 +44,11 @@ jobs:
         env:
           REFERENTIEL_TOKEN: ${{ secrets.CHAMPIS_REFERENTIEL_TOKEN }}
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
 
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -90,7 +90,7 @@ jobs:
       group: deploy-champis-web
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -110,7 +110,7 @@ jobs:
         env:
           REFERENTIEL_TOKEN: ${{ secrets.CHAMPIS_REFERENTIEL_TOKEN }}
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
 
