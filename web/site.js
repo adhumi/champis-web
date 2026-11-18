@@ -53,10 +53,24 @@
    *  points, puis `sentence` de `GET /weather` et un point. Sans `sentence` (API plus ancienne), le
    *  terrain seul et la liste `summary` à la suite (`phrases`). Même règle que `PointSheet.sentence`
    *  de l'app. */
-  function pointSentence(terrain, sentence, summary) {
+  function pointSentence(terrain, sentence, summary, link = " : ") {
     const lead = terrain.charAt(0).toUpperCase() + terrain.slice(1);
-    if (typeof sentence === "string" && sentence) return { sentence: `${lead} : ${sentence}.`, phrases: [] };
+    if (typeof sentence === "string" && sentence) return { sentence: `${lead}${link}${sentence}.`, phrases: [] };
     return { sentence: `${lead}.`, phrases: Array.isArray(summary) ? summary : [] };
+  }
+
+  /** Ce qui relie le terrain à la phrase (spec › App iOS › Liaison entre le terrain et la phrase,
+   *  18 nov. 2026) : « et » quand la suite va dans le même sens que le terrain, « mais » quand elle
+   *  s'y oppose, une virgule quand l'un des deux est neutre ; les deux-points d'avant sans
+   *  `sentence_tone` (réponse plus ancienne). `label` : libellé de palette de T (excellent et bon :
+   *  favorable ; moyen : neutre ; sinon défavorable) ; `tone` : `sentence_tone` de `GET /weather`.
+   *  Même règle que `PointSheet.link` de l'app. */
+  function pointLink(label, tone) {
+    const weather = { favorable: 1, defavorable: -1, neutre: 0 }[tone];
+    if (weather === undefined) return " : ";
+    const terrain = label === "excellent" || label === "bon" ? 1 : label === "moyen" || label == null ? 0 : -1;
+    if (weather === 0 || terrain === 0) return ", ";
+    return weather === terrain ? " et " : " mais ";
   }
 
   /** Les autres espèces d'un point, par famille (groupe d'affichage du référentiel). `items` :
@@ -505,7 +519,7 @@
   const Site = {
     WEEKDAYS, SHORT_WEEKDAYS, DAY_RANGE, SUPPORT_URL, SUPPORT_VISIBLE, APP_LINE, CONTACT_EMAIL, API_URL,
     weekdayName, shortWeekday, frenchDate, shortDate, dateFor, whenWord, parisParts, computedPhrase, todayLine,
-    trend, trendPhrase, pointSentence, pointFamilies, geocodeUrl, geocodeResults, forestUrl, forestPhrase,
+    trend, trendPhrase, pointSentence, pointLink, pointFamilies, geocodeUrl, geocodeResults, forestUrl, forestPhrase,
     hexToRgb, safeHex, isSpeciesId, sortedClasses, classify, pixelColor, accentHex, classCounts, seasonSentence,
     esc, inline, renderMarkdown, markdownTitle, apiBase, isLocal, isDev,
     VIEW_KEY, VIEW_VERSION, FRANCE_BOUNDS, VIEW_LIMITS, serializeView, parseView, hashView, initialView, readStoredView, storeView,

@@ -449,3 +449,23 @@ def test_point_families_put_the_featured_family_first_then_sort_by_score():
         ("", ["seule"]),
         ("cepes", ["edulis", "aereus", "pinophilus"]),
     ]
+
+
+def test_point_link_says_and_but_or_a_comma_between_terrain_and_sentence():
+    """Liaison (spec › App iOS, 18 nov. 2026) : « et » dans le même sens que le terrain, « mais » à
+    l'opposé, une virgule si l'un est neutre ; sans `sentence_tone`, les deux-points d'avant."""
+    cases = [
+        (["bon", "favorable"], " et "),
+        (["faible", "defavorable"], " et "),
+        (["excellent", "defavorable"], " mais "),
+        (["tres_faible", "favorable"], " mais "),
+        (["bon", "neutre"], ", "),
+        (["moyen", "defavorable"], ", "),
+        ([None, "favorable"], ", "),
+        (["bon", None], " : "),
+        (["bon", "autre"], " : "),
+    ]
+    assert call(*(("pointLink", args) for args, _ in cases)) == [want for _, want in cases]
+    late = "la dernière grosse pluie remonte à 23 jours et la pousse s'essouffle"
+    out = call(("pointSentence", ["terrain très favorable", late, None, " mais "]))[0]
+    assert out["sentence"] == f"Terrain très favorable mais {late}."

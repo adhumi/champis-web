@@ -1214,7 +1214,10 @@ function showProbe(st) {
   const isLead = sid === st.best?.sid;
   const { nodata } = altEnc();
   const row = st.body?.species?.[sid]?.find((d) => d.date === currentDate())?.by_alt?.[st.altKey];
-  const text = Site.pointSentence(terrainPhrase(item.T), row?.sentence, pending ? ["météo : chargement…"] : row?.summary);
+  const text = Site.pointSentence(
+    terrainPhrase(item.T), row?.sentence, pending ? ["météo : chargement…"] : row?.summary,
+    Site.pointLink(classify(item.T).label, row?.sentence_tone)
+  );
   const factors = row?.factors ?? null;
   const factorsTxt = factors
     ? Object.entries(factors).filter(([k]) => k !== "M").map(([k, v]) => `${k} ${(+v).toFixed(2)}`).join(" · ")
