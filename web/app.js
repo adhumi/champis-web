@@ -477,6 +477,8 @@ const ICONS = {
   layers: '<path d="m12 3 9 5-9 5-9-5 9-5z"/><path d="m3 13 9 5 9-5"/>',
   legend: '<path d="M4 6h16M4 12h16M4 18h10"/>',
   check: '<path d="m5 12 5 5 9-10"/>',
+  close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  chevron: '<path d="m6 9 6 6 6-6"/>',
 };
 const svg = (name, cls = "") => `<svg${cls ? ` class="${cls}"` : ""} viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 const BASEMAP_NAMES = { plan: "Plan IGN", ortho: "Photo aérienne IGN", osm: "OpenStreetMap" };
@@ -1066,22 +1068,33 @@ function scoreHtml(value, pending) {
 }
 
 /** Les autres espèces du point, par famille (`Site.pointFamilies`) : vignette, nom français, nom
- *  latin, pastille et libellé du score du jour ; chaque ligne est un bouton qui met l'espèce en
- *  avant dans la fiche. */
-function familiesHtml(families, pending) {
+ *  latin, pastille et libellé du score du jour. Chaque ligne est un bouton qui déplie l'espèce
+ *  (18 nov. 2026, comme l'app) : sous la ligne `expanded.sid`, sa phrase et sa tendance
+ *  (`expanded.more` : { sentence, phrases, trend }, ou null tant que la météo n'est pas là). */
+function familiesHtml(families, pending, expanded) {
+  const more = (m) =>
+    m
+      ? `<p>${esc(m.sentence)}</p>` +
+        (m.phrases.length ? `<ul>${m.phrases.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : "") +
+        (m.trend ? `<p class="trend">Tendance : ${esc(m.trend)}</p>` : "")
+      : `<p class="note">${pending ? "météo : chargement…" : "Pas de météo pour cette espèce ici."}</p>`;
   return families
     .map(
       (f) =>
         `<h3>${esc(f.title)}</h3><ul class="others">` +
         f.species
-          .map(
-            (it) =>
-              `<li><button type="button" data-sid="${esc(it.id)}">` +
+          .map((it) => {
+            const open = expanded?.sid === it.id;
+            return (
+              `<li><button type="button" data-sid="${esc(it.id)}" aria-expanded="${open}">` +
               `<img class="thumb" src="${illustration(it.id)}" alt="" loading="lazy" decoding="async" />` +
               `<span class="names"><span class="fr">${esc(it.fr)}</span>` +
               (it.la ? `<span class="la"><i>${esc(it.la)}</i></span>` : "") +
-              `</span>${scoreHtml(it.value, pending)}</button></li>`
-          )
+              `</span>${scoreHtml(it.value, pending)}${svg("chevron", "chevron")}</button>` +
+              (open ? `<div class="more">${more(expanded.more)}</div>` : "") +
+              `</li>`
+            );
+          })
           .join("") +
         `</ul>`
     )
@@ -1092,11 +1105,12 @@ function familiesHtml(families, pending) {
  *  2026 : terrain puis `sentence` de l'API ; `phrases` = la liste d'avant, d'une API plus
  *  ancienne), les onze jours du point (étape A, en lecture seule : la carte reste sur aujourd'hui)
  *  avec leur tendance (étape B2), le statut de la forêt (étape B5), les autres espèces du point
- *  par famille, puis les chiffres derrière Détails. Sans espèce en avant (`sid` nul : la couche
- *  n'a rien ici), `message` puis les autres espèces. `onFeature(sid)` : clic sur une ligne. */
+ *  par famille, à déplier (`expanded`, `onToggle(sid)` : clic sur une ligne), puis les chiffres
+ *  derrière Détails. Sans espèce en avant (`sid` nul : la couche n'a rien ici), `message` puis les
+ *  autres espèces. La fiche se ferme par la croix de son coin (18 nov. 2026). */
 function renderProbe({
   sid = null, value = null, name = "", latin = "", sentence = "", phrases = [], details = "", days = null,
-  forest = null, families = [], pending = false, message = "", onFeature = null,
+  forest = null, families = [], pending = false, message = "", expanded = null, onToggle = null,
 }) {
   const good = classes.find((c) => c.label === "bon")?.min ?? 1;
   const trendText = days ? Site.trendPhrase(Site.trend(days, weather.today, good)) : null;
@@ -1117,16 +1131,19 @@ function renderProbe({
         (phrases.length ? `<ul>${phrases.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : "") +
         (days ? `<div id="probe-days" aria-label="Les onze jours de ce point"></div>` : "") +
         (trendText ? `<p class="trend">Tendance : ${esc(trendText)}</p>` : "");
+  // le défilement de la fiche tient d'un rendu à l'autre : déplier une ligne ne remonte pas en tête
+  const scrolled = probe.scrollTop;
   probe.innerHTML =
+    `<button type="button" class="icon-button" id="probe-close" aria-label="Fermer la fiche">${svg("close")}</button>` +
     lead +
     (forest ? `<p class="forest">${esc(forest)}</p>` : "") +
-    familiesHtml(families, pending) +
-    (sid === null ? "" : `<details><summary>Détails</summary><div>${esc(details)}</div></details>`) +
-    `<button type="button" class="button quiet small" id="probe-close">Fermer</button>`;
+    familiesHtml(families, pending, expanded) +
+    (sid === null ? "" : `<details><summary>Détails</summary><div>${esc(details)}</div></details>`);
+  probe.scrollTop = scrolled;
   $("probe-close").addEventListener("click", () => (probe.style.display = "none"));
   probe.querySelectorAll("img").forEach(hideBrokenThumb);
-  if (onFeature) {
-    probe.querySelectorAll("button[data-sid]").forEach((b) => b.addEventListener("click", () => onFeature(b.dataset.sid)));
+  if (onToggle) {
+    probe.querySelectorAll("button[data-sid]").forEach((b) => b.addEventListener("click", () => onToggle(b.dataset.sid)));
   }
   if (sid !== null && days) Site.renderDayDots($("probe-days"), { today: weather.today, days, classes });
 }
@@ -1193,25 +1210,44 @@ function probeItems(st) {
   });
 }
 
-/** Affiche la fiche d'un point depuis son état `st` : l'espèce mise en avant (celle dont on a
- *  cliqué la ligne, sinon celle qui porte le score de la couche) avec sa phrase, ses onze jours et
- *  ses détails, puis les autres espèces par famille. La couche de la carte ne change pas. */
+/** Phrase et tendance d'une espèce de la fiche, pour sa ligne dépliée : le terrain du pixel, la
+ *  liaison et `sentence` de l'API (la liste `summary` d'une API plus ancienne), puis la tendance de
+ *  ses onze jours. null tant que la météo du point n'est pas arrivée, ou si elle manque. */
+function probeMore(st, item) {
+  if (!st.body) return null;
+  const row = st.body.species?.[item.id]?.find((d) => d.date === currentDate())?.by_alt?.[st.altKey];
+  if (!row) return null;
+  const text = Site.pointSentence(
+    terrainPhrase(item.T), row.sentence, row.summary, Site.pointLink(classify(item.T).label, row.sentence_tone)
+  );
+  const good = classes.find((c) => c.label === "bon")?.min ?? 1;
+  const days = pointDays(st.body, { [item.id]: item.T }, st.altKey, st.lat, st.lon, st.altIdx);
+  return { ...text, trend: Site.trendPhrase(Site.trend(days, weather.today, good)) };
+}
+
+/** Affiche la fiche d'un point depuis son état `st` : l'espèce en exergue, celle qui porte le
+ *  score de la couche, avec sa phrase, ses onze jours et ses détails, puis les autres espèces par
+ *  famille. Cliquer une autre espèce déplie sa ligne (phrase et tendance), une seule à la fois,
+ *  sans changer l'espèce en exergue ni la couche de la carte (18 nov. 2026, comme l'app). */
 function showProbe(st) {
   const items = probeItems(st);
-  const sid = st.featured ?? st.best?.sid ?? null;
+  const sid = st.best?.sid ?? null;
   const item = sid === null ? null : items.find((it) => it.id === sid) ?? null;
   const pending = st.cell !== null && st.body === undefined;
-  const onFeature = (id) => {
+  const onToggle = (id) => {
     if (st.token !== probeToken) return;
-    st.featured = id === st.best?.sid ? null : id;
+    st.expanded = st.expanded === id ? null : id;
     showProbe(st);
   };
-  const common = { forest: st.forest, families: Site.pointFamilies(items, item ? sid : null), pending, onFeature };
+  const open = st.expanded ? items.find((it) => it.id === st.expanded) : null;
+  const common = {
+    forest: st.forest, families: Site.pointFamilies(items, item ? sid : null), pending, onToggle,
+    expanded: open ? { sid: open.id, more: probeMore(st, open) } : null,
+  };
   if (!item) {
     renderProbe({ ...common, message: st.message });
     return;
   }
-  const isLead = sid === st.best?.sid;
   const { nodata } = altEnc();
   const row = st.body?.species?.[sid]?.find((d) => d.date === currentDate())?.by_alt?.[st.altKey];
   const text = Site.pointSentence(
@@ -1225,21 +1261,17 @@ function showProbe(st) {
   const altTxt = altLayer && st.altIdx !== null && st.altIdx !== nodata ? "" : " (médiane cellule)";
   const where =
     altLayer?.fine && st.altIdx !== null && st.altIdx !== nodata
-      ? `altitude ${Field.elevation(st.altIdx, altEnc().step_m)} m${isLead ? ", entre classes" : `, classe ${st.altKey} m`}`
+      ? `altitude ${Field.elevation(st.altIdx, altEnc().step_m)} m, entre classes`
       : `classe ${st.altKey} m${altTxt}`;
-  const how = isLead
-    ? "interpolé entre cellules voisines"
-    : "cellule du point, sans interpolation avec ses voisines : peut différer d'un cran de la couleur qu'aurait la carte";
   const details =
     st.body === undefined
       ? "…"
-      : (item.value === null
-          ? `T ${item.T.toFixed(2)} · pas de météo pour cette espèce`
-          : `S = ${item.value.toFixed(3)} · T ${item.T.toFixed(2)} × M_eff·Φ ${(item.T > 0 ? item.value / item.T : 0).toFixed(2)} (${how})`) +
+      : `S = ${item.value.toFixed(3)} · T ${item.T.toFixed(2)} × M_eff·Φ ${(item.T > 0 ? item.value / item.T : 0).toFixed(2)} (interpolé entre cellules voisines)` +
         ` · ${where}${st.cell?.stale ? " · météo périmée" : ""}\n` +
-        `Facteurs de la cellule ${st.cell?.id ?? "?"} : ${factorsTxt}`;
-  // les onze jours : le max de la couche pour son espèce porteuse (règle 9), l'espèce seule sinon
-  const days = st.body ? pointDays(st.body, isLead ? st.tBySid : { [sid]: item.T }, st.altKey, st.lat, st.lon, st.altIdx) : null;
+        `Facteurs de la cellule ${st.cell?.id ?? "?"} : ${factorsTxt}\n` +
+        `Les autres espèces de la liste ont le score de la cellule du point, sans interpolation avec ses voisines : il peut différer d'un cran de la couleur qu'aurait la carte.`;
+  // les onze jours : le max de la couche pour son espèce porteuse (règle 9)
+  const days = st.body ? pointDays(st.body, st.tBySid, st.altKey, st.lat, st.lon, st.altIdx) : null;
   renderProbe({
     ...common, sid, value: item.value, name: item.fr, latin: item.la, sentence: text.sentence, phrases: text.phrases, days, details,
   });
@@ -1294,7 +1326,7 @@ map.on("click", async (e) => {
     token, lat: e.lngLat.lat, lon: e.lngLat.lng, altIdx, cell, best, layerV, tBySid, allT,
     altKey: cell ? String(Field.altCenter(cell, altIdx, altEnc())) : null,
     body: cell ? undefined : null, // undefined : en cours ; null : pas de réponse
-    featured: null, forest: null,
+    expanded: null, forest: null,
     message:
       Object.keys(tBySid).length > 0
         ? "Pas de météo pour ce secteur aujourd'hui : le serveur réessaie."
